@@ -23,43 +23,31 @@
 
 #include "sys.h"
 #include "AIResolver.h"
+#include "threadsafe/aithreadsafe.h"
+#include "utils/NodeMemoryPool.h"
 
-char const* AIResolver::state_str_impl(state_type run_state) const
+namespace {
+SingletonInstance<AIResolver> dummy __attribute__ ((__unused__));
+} // namespace
+
+std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::string&& servicename)
 {
-  switch(run_state)
+  DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
+  std::shared_ptr<AILookup> handle;
   {
-    AI_CASE_RETURN(AIResolver_start);
-    AI_CASE_RETURN(AIResolver_done);
+    utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
+    handle = std::allocate_shared<AILookup>(node_allocator, std::move(hostname), std::move(servicename));
   }
-  ASSERT(false);
-  return "UNKNOWN STATE";
-}
 
-void AIResolver::done()
-{
-  mLookupFinished.store(true, std::memory_order_relaxed);
-  signal(1);
-}
+  Dout(dc::notice, "All done...");
 
-void AITimer::multiplex_impl(state_type run_state)
-{
-  switch (run_state)
-  {
-    case AIResolver_start:
-      {
-        // ...
-	wait_until([&]{ return mLookupFinished.load(std::memory_order_relaxed); }, 1, AIResolver_done);
-        break;
-      }
-    case AIResolver_done:
-      {
-        finish();
-        break;
-      }
-  }
-}
+  // Fake a lookup for now.
+  evio::SocketAddress sa1("127.0.0.1:80");
+  evio::SocketAddress sa2("127.0.0.2:80");
+  evio::SocketAddressList list;
+  list += sa1;
+  list += sa2;
+  handle->set_result(std::move(list));
 
-void AITimer::abort_impl()
-{
-  // ...
+  return handle;
 }

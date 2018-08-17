@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Resolve a hostname. Declaration of class AIResolver.
+ * @brief Singleton for DNS lookups. Declaration of class AIResolver.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -23,94 +23,35 @@
 
 #pragma once
 
-#include "AIStatefulTask.h"
-#include <atomic>
+#include "AILookup.h"
+#include "utils/Singleton.h"
+#include "utils/NodeMemoryPool.h"
+#include <boost/pool/object_pool.hpp>
+#include <memory>
+#include <type_traits>
 
-/*!
- * @brief The resolver task.
- *
- * Before calling @link group_run run()@endlink, call set_hostname() to pass needed parameters.
- *
- * When the task finishes it calls the callback, use parameter _1,
- * (success) to check whether or not the task actually finished or
- * was cancelled. The boolean is true when it resolved the hostname
- * and false if the task was aborted.
- *
- * Objects of this type can be reused multiple times, see
- * also the documentation of AIStatefulTask.
- *
- * Typical usage:
- *
- * @code
- * AIResolver* resolver = new AIResolver;
- *
- * resolver->set_hostname("www.google.com");
- * resolver->run(...);          // Start hostname look up and pass callback; see AIStatefulTask.
- * @endcode
- *
- * The default behavior is to call the callback and then delete the AIResolver object.
- * You can call run(...) with parameters from the callback function to do another look up.
- */
-class AIResolver : public AIStatefulTask
+class AIResolver : public Singleton<AIResolver>
 {
- protected:
-  //! The base class of this task.
-  using direct_base_type = AIStatefulTask;
+  friend_Instance;
+ private:
+  AIResolver() : m_node_memory_pool(128) { }
+  ~AIResolver() { }
+  AIResolver(AIResolver const&) = delete;
 
-  //! The different states of the stateful task.
-  enum resolver_state_type {
-    AIResolver_start = direct_base_type::max_state,
-    AIResolver_done
-  };
+  template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of AIResolver.
+  utils::NodeMemoryPool m_node_memory_pool;
+  std::shared_ptr<AILookup> do_request(std::string&& hostname, std::string&& servicename);
 
  public:
-  //! One beyond the largest state of this task.
-  static state_type constexpr max_state = AIResolver_done + 1;
-
- private:
-  std::atomic_bool mLookupFinished;     //!< Set to true after the hostname lookup finished.
-  std::string mHostname;                //!< Input variable: the hostname that needs to be resolved.
-
- public:
-  /*!
-   * @brief Construct an AIResolver object.
-   */
-  AIResolver(DEBUG_ONLY(bool debug = false)) :
-#ifdef CWDEBUG
-    AIStatefulTask(debug),
-#endif
-    mLoopupFinished(false) { DoutEntering(dc::statefultask(mSMDebug), "AIResolver() [" << (void*)this << "]"); }
-
-  /*!
-   * @brief Set the hostname that needs to be resolved.
-   *
-   * @param hostname The hostname to be resolved.
-   *
-   * Call abort() at any time to stop the resolver (and delete the AIResolver object).
-   */
-  void set_hostname(std::string hostname) { mHostname = hostname; }
-
-  /*!
-   * @brief Get the hostname.
-   *
-   * @returns the hostname that was set by set_hostname.
-   */
-  std::string const& get_hostname() const { return mHostname; }
-
- protected:
-  //! Call finish() (or abort()), not delete.
-  ~AIResolver() override { DoutEntering(dc::statefultask(mSMDebug), "~AIResolver() [" << (void*)this << "]"); }
-
-  //! Implemenation of state_str for run states.
-  char const* state_str_impl(state_type run_state) const override;
-
-  //! Handle mRunState.
-  void multiplex_impl(state_type run_state) override;
-
-  //! Handle aborting from current bs_run state.
-  void abort_impl() override;
-
- private:
-  // This is the callback for ....
-  void done();
+  // Hostname and servicename should be std::string or char const*; the template is only to allow perfect forwarding.
+  // See ai-statefultask-testsuite/src/tracked_string.cxx for the test case.
+  template<typename S1, typename S2>
+  typename std::enable_if<
+      (std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value) &&
+      (std::is_same<S2, std::string>::value || std::is_convertible<S2, std::string>::value),
+      std::shared_ptr<AILookup>>::type
+  request(S1&& hostname, S2&& servicename)
+  {
+    return do_request(std::forward<std::string>(hostname), std::forward<std::string>(servicename));
+  }
 };

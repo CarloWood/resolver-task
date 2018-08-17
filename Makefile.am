@@ -1,14 +1,18 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
-noinst_LTLIBRARIES = libfilelocktask.la
+noinst_LTLIBRARIES = libresolvertask.la
 
 SOURCES = \
-	Resolver.h \
-	Resolver.cxx
+	AIResolver.h \
+	AIResolver.cxx \
+	AILookupTask.h \
+	AILookupTask.cxx \
+	AILookup.h \
+	AILookup.cxx
 
-libfilelocktask_la_SOURCES = ${SOURCES}
-libfilelocktask_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@
-libfilelocktask_la_LIBADD = @LIBCWD_R_LIBS@
+libresolvertask_la_SOURCES = ${SOURCES}
+libresolvertask_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@
+libresolvertask_la_LIBADD = @LIBCWD_R_LIBS@
 
 # --------------- Maintainer's Section
 
