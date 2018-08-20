@@ -1,5 +1,7 @@
 AM_CPPFLAGS = -iquote $(top_builddir) -iquote $(top_srcdir) -iquote $(top_srcdir)/cwds
 
+SUBDIRS = dns
+
 noinst_LTLIBRARIES = libresolvertask.la
 
 SOURCES = \

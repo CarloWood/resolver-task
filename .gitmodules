@@ -1,0 +1,4 @@
+[submodule "dns"]
+	path = dns
+	url = https://github.com/CarloWood/dns.git
+	branch = experimental
