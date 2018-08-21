@@ -26,9 +26,13 @@
 #include "AILookup.h"
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
-#include <boost/pool/object_pool.hpp>
+#include "evio/Device.h"
+#include <boost/intrusive_ptr.hpp>
 #include <memory>
 #include <type_traits>
+
+struct dns_resolv_conf;
+struct dns_resolver;
 
 class AIResolver : public Singleton<AIResolver>
 {
@@ -39,7 +43,28 @@ class AIResolver : public Singleton<AIResolver>
   AIResolver(AIResolver const&) = delete;
 
   template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of AIResolver.
+
+  class ResolverDevice : public evio::InputDevice, public evio::OutputDevice
+  {
+   private:
+    struct dns_resolv_conf* m_dns_resolv_conf;
+    struct dns_resolver* m_dns_resolver;
+
+    static void dns_wants_to_write(void* user_data);
+    static void dns_wants_to_read(void* user_data);
+    static void dns_closed_fd(void* user_data);
+
+   public:
+    ResolverDevice();
+    ~ResolverDevice();
+
+   protected:
+    RefCountReleaser closed() override;
+  };
+
+  boost::intrusive_ptr<ResolverDevice> m_resolver_device;
   utils::NodeMemoryPool m_node_memory_pool;
+
   std::shared_ptr<AILookup> do_request(std::string&& hostname, std::string&& servicename);
 
  public:
@@ -53,5 +78,12 @@ class AIResolver : public Singleton<AIResolver>
   request(S1&& hostname, S2&& servicename)
   {
     return do_request(std::forward<std::string>(hostname), std::forward<std::string>(servicename));
+  }
+
+  void close()
+  {
+    DoutEntering(dc::notice, "AIResolver::close()");
+    m_resolver_device->close_input_device();
+    m_resolver_device.reset();
   }
 };
