@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "AIResolver.h"
+#include "evio/AddressInfo.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
@@ -32,19 +33,28 @@ unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    
 //static
 void AIResolver::ResolverDevice::dns_wants_to_write(void* user_data)
 {
-  Dout(dc::notice, "Calling want_to_write()");
+  DoutEntering(dc::notice, "dns_wants_to_write()");
+  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  self->start_output_device();
 }
 
 //static
 void AIResolver::ResolverDevice::dns_wants_to_read(void* user_data)
 {
-  Dout(dc::notice, "Calling want_to_write()");
+  DoutEntering(dc::notice, "dns_wants_to_read()");
+  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  self->start_input_device();
 }
 
 //static
 void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
 {
-  Dout(dc::notice, "Calling want_to_write()");
+  DoutEntering(dc::notice, "dns_closed_fd()");
+  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  ASSERT(false); // When do we get here?
+  RefCountReleaser releaser = self->close_input_device();
+  releaser += self->close_output_device();
+  ASSERT(self->is_dead());
 }
 
 AIResolver::ResolverDevice::ResolverDevice() :
@@ -67,6 +77,8 @@ AIResolver::ResolverDevice::ResolverDevice() :
 
     if (!(m_dns_resolv_conf = dns_resconf_local(&error)))
       { error_function = "dns_resconf_local"; break; }
+
+    m_dns_resolv_conf->options.recurse = 1;
 
     if (!(hosts = dns_hosts_local(&error)))
       { error_function = "dns_hosts_local"; break; }
@@ -96,6 +108,31 @@ AIResolver::ResolverDevice::ResolverDevice() :
   }
 }
 
+void AIResolver::ResolverDevice::write_to_fd(int fd)
+{
+  DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
+  dns_do_write(m_dns_resolver);
+  stop_output_device();
+}
+
+void AIResolver::ResolverDevice::read_from_fd(int fd)
+{
+  DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
+  dns_do_read(m_dns_resolver);
+  stop_input_device();
+  evio::AddressInfoList addrinfo_list(nullptr);
+  int error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
+  if (error == EAGAIN)
+    return;
+  do
+  {
+    ASSERT(error == 0 || error == ENOENT);
+    Dout(dc::notice, "Result: " << addrinfo_list);
+    error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
+  }
+  while (error == 0);	// Can EAGAIN happen?
+}
+
 AIResolver::ResolverDevice::~ResolverDevice()
 {
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::~ResolverDevice()");
@@ -114,6 +151,18 @@ evio::IOBase::RefCountReleaser AIResolver::ResolverDevice::closed()
   return evio::IOBase::RefCountReleaser();
 }
 
+void AIResolver::ResolverDevice::getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup)
+{
+  int error;
+  m_addrinfo = dns_ai_open(lookup->get_hostname().c_str(), lookup->get_servicename().c_str(), (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+  ASSERT(m_addrinfo != nullptr);  // error will still be uninitialized in this case.
+  Dout(dc::notice, "ResolverDevice::getaddrinfo: dns_ai_open returned " << m_addrinfo);
+  evio::AddressInfoList addrinfo_list(nullptr);
+  error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
+  // libdns just called dns_wants_to_write, and then always returns DNS_EAGAIN.
+  ASSERT(error == EAGAIN);
+}
+
 std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::string&& servicename)
 {
   DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
@@ -126,6 +175,9 @@ std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::st
     utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
     handle = std::allocate_shared<AILookup>(node_allocator, std::move(hostname), std::move(servicename));
   }
+
+  evio::AddressInfoHints hints;
+  m_resolver_device->getaddrinfo(hints, handle.get());
 
 #if 0
   // Fake a lookup for now.

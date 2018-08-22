@@ -31,8 +31,13 @@
 #include <memory>
 #include <type_traits>
 
+namespace evio {
+class AddressInfoHints;
+} // namespace evio;
+
 struct dns_resolv_conf;
 struct dns_resolver;
+struct dns_addrinfo;
 
 class AIResolver : public Singleton<AIResolver>
 {
@@ -49,6 +54,7 @@ class AIResolver : public Singleton<AIResolver>
    private:
     struct dns_resolv_conf* m_dns_resolv_conf;
     struct dns_resolver* m_dns_resolver;
+    struct dns_addrinfo* m_addrinfo;
 
     static void dns_wants_to_write(void* user_data);
     static void dns_wants_to_read(void* user_data);
@@ -58,7 +64,11 @@ class AIResolver : public Singleton<AIResolver>
     ResolverDevice();
     ~ResolverDevice();
 
+    void getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup);
+
    protected:
+    void write_to_fd(int fd) override;    // Write thread.
+    void read_from_fd(int fd) override;   // Read thread.
     RefCountReleaser closed() override;
   };
 
