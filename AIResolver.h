@@ -61,10 +61,13 @@ class AIResolver : public Singleton<AIResolver>
     static void dns_closed_fd(void* user_data);
 
    public:
-    ResolverDevice();
+    ResolverDevice(bool recurse);
     ~ResolverDevice();
 
     void getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup);
+
+   private:
+    void run_dns();
 
    protected:
     void write_to_fd(int fd) override;    // Write thread.

@@ -57,7 +57,7 @@ void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-AIResolver::ResolverDevice::ResolverDevice() :
+AIResolver::ResolverDevice::ResolverDevice(bool recurse) :
     evio::InputDevice(new evio::InputBuffer),
     evio::OutputDevice(new evio::OutputBuffer),
     m_dns_resolv_conf(nullptr),
@@ -74,17 +74,28 @@ AIResolver::ResolverDevice::ResolverDevice() :
 
   do    // So we can use break (error).
   {
+    if (recurse)
+    {
+      if (!(m_dns_resolv_conf = dns_resconf_root(&error)))
+        { error_function = "dns_resconf_root"; break; }
 
-    if (!(m_dns_resolv_conf = dns_resconf_local(&error)))
-      { error_function = "dns_resconf_local"; break; }
+      if (!(hosts = dns_hosts_local(&error)))
+        { error_function = "dns_hosts_local"; break; }
 
-    m_dns_resolv_conf->options.recurse = 1;
+      if (!(hints = dns_hints_root(m_dns_resolv_conf, &error)))
+        { error_function = "dns_hints_root"; break; }
+    }
+    else
+    {
+      if (!(m_dns_resolv_conf = dns_resconf_local(&error)))
+        { error_function = "dns_resconf_local"; break; }
 
-    if (!(hosts = dns_hosts_local(&error)))
-      { error_function = "dns_hosts_local"; break; }
+      if (!(hosts = dns_hosts_local(&error)))
+        { error_function = "dns_hosts_local"; break; }
 
-    if (!(hints = dns_hints_local(m_dns_resolv_conf, &error)))
-      { error_function = "dns_hints_local"; break; }
+      if (!(hints = dns_hints_local(m_dns_resolv_conf, &error)))
+        { error_function = "dns_hints_local"; break; }
+    }
 
     if (!(m_dns_resolver = dns_res_open(m_dns_resolv_conf, hosts, hints, nullptr, &opts, &error)))
       { error_function = "dns_res_open"; break; }
@@ -111,26 +122,32 @@ AIResolver::ResolverDevice::ResolverDevice() :
 void AIResolver::ResolverDevice::write_to_fd(int fd)
 {
   DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
-  dns_do_write(m_dns_resolver);
   stop_output_device();
+  dns_so_is_writable(m_dns_resolver);
+  run_dns();
 }
 
 void AIResolver::ResolverDevice::read_from_fd(int fd)
 {
   DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
-  dns_do_read(m_dns_resolver);
   stop_input_device();
+  dns_so_is_readable(m_dns_resolver);
+  run_dns();
+}
+
+void AIResolver::ResolverDevice::run_dns()
+{
   evio::AddressInfoList addrinfo_list(nullptr);
-  int error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
-  if (error == EAGAIN)
-    return;
-  do
+  for (;;)
   {
-    ASSERT(error == 0 || error == ENOENT);
+    // Give CPU to libdns.
+    int error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
+
+    if (error != 0)
+      break;
+
     Dout(dc::notice, "Result: " << addrinfo_list);
-    error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
   }
-  while (error == 0);	// Can EAGAIN happen?
 }
 
 AIResolver::ResolverDevice::~ResolverDevice()
@@ -167,8 +184,8 @@ std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::st
 {
   DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
 
-  if (AI_UNLIKELY(!m_resolver_device))          // Only true the first call.
-    m_resolver_device = new ResolverDevice;
+  if (AI_UNLIKELY(!m_resolver_device))                  // Only true the first call.
+    m_resolver_device = new ResolverDevice(true);       // true = do recursive lookups.
 
   std::shared_ptr<AILookup> handle;
   {
