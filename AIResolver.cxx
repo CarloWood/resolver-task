@@ -30,6 +30,25 @@
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
+AIResolver::~AIResolver()
+{
+  // It is OK to call this with a nullptr.
+  dns_res_close(m_dns_resolver);
+}
+
+//static
+void* AIResolver::ResolverDevice::dns_created_socket(int fd)
+{
+  DoutEntering(dc::notice, "ResolverDevice::dns_created_socket(" << fd << ")");
+  ResolverDevice* resolver_device = new ResolverDevice();
+  resolver_device->init(fd);
+  resolver_device->m_flags |= INTERNAL_FDS_DONT_CLOSE; // Let the closing be done by libdns.
+  // Increment ref count to stop this ResolverDevice from being deleted while being used by libdns.
+  intrusive_ptr_add_ref(resolver_device);
+  Dout(dc::io, "Incremented ref count (now " << resolver_device->ref_count() << ") [" << (void*)static_cast<IOBase*>(resolver_device) << ']');
+  return resolver_device;
+}
+
 //static
 void AIResolver::ResolverDevice::dns_wants_to_write(void* user_data)
 {
@@ -52,19 +71,23 @@ void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
   DoutEntering(dc::notice, "dns_closed_fd()");
   ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
   ASSERT(false); // When do we get here?
-  RefCountReleaser releaser = self->close_input_device();
+  RefCountReleaser releaser;
+  // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
+  releaser = self;
+  releaser += self->close_input_device();
   releaser += self->close_output_device();
   ASSERT(self->is_dead());
 }
 
-AIResolver::ResolverDevice::ResolverDevice(bool recurse) :
+AIResolver::ResolverDevice::ResolverDevice() :
     evio::InputDevice(new evio::InputBuffer),
-    evio::OutputDevice(new evio::OutputBuffer),
-    m_dns_resolv_conf(nullptr),
-    m_dns_resolver(nullptr)
+    evio::OutputDevice(new evio::OutputBuffer)
 {
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::ResolverDevice()");
+}
 
+void AIResolver::init(bool recurse)
+{
   // Initialize dns.
   static struct dns_options const opts = { { nullptr, nullptr }, dns_options::DNS_LIBEVENT };
   int error = 0;
@@ -100,12 +123,8 @@ AIResolver::ResolverDevice::ResolverDevice(bool recurse) :
     if (!(m_dns_resolver = dns_res_open(m_dns_resolv_conf, hosts, hints, nullptr, &opts, &error)))
       { error_function = "dns_res_open"; break; }
 
-    // Set callback functions.
-    dns_set_so_hooks(m_dns_resolver, this, &dns_wants_to_write, &dns_wants_to_read, &dns_closed_fd);
-    int fd = dns_udp_fd(m_dns_resolver);
-    Dout(dc::notice, "The file descriptor of the UDP socket of the resolver is " << fd);
-    init(fd);
-    m_flags |= INTERNAL_FDS_DONT_CLOSE; // Let the closing be done by libdns.
+    // Set callback functions; this calls dns_created_socket for the already created UDP socket before it returns.
+    dns_set_so_hooks(m_dns_resolver, &ResolverDevice::dns_created_socket, &ResolverDevice::dns_wants_to_write, &ResolverDevice::dns_wants_to_read, &ResolverDevice::dns_closed_fd);
   }
   while (0);
   if (error_function)
@@ -123,19 +142,19 @@ void AIResolver::ResolverDevice::write_to_fd(int fd)
 {
   DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
   stop_output_device();
-  dns_so_is_writable(m_dns_resolver);
-  run_dns();
+  dns_so_is_writable(AIResolver::instance().m_dns_resolver, this);
+  AIResolver::instance().run_dns();
 }
 
 void AIResolver::ResolverDevice::read_from_fd(int fd)
 {
   DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
   stop_input_device();
-  dns_so_is_readable(m_dns_resolver);
-  run_dns();
+  dns_so_is_readable(AIResolver::instance().m_dns_resolver, this);
+  AIResolver::instance().run_dns();
 }
 
-void AIResolver::ResolverDevice::run_dns()
+void AIResolver::run_dns()
 {
   evio::AddressInfoList addrinfo_list(nullptr);
   for (;;)
@@ -153,24 +172,27 @@ void AIResolver::ResolverDevice::run_dns()
 AIResolver::ResolverDevice::~ResolverDevice()
 {
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::~ResolverDevice()");
-  // It is OK to call this with a nullptr.
-  dns_res_close(m_dns_resolver);
 }
 
 evio::IOBase::RefCountReleaser AIResolver::ResolverDevice::closed()
 {
+  DoutEntering(dc::notice, "AIResolver::ResolverDevice::closed()");
+#if 0 // FIXME
   // close() was just called. Actually close the socket using a libdns call.
   // This function destroys everything, so set the pointers to nullptr just in case.
   dns_res_close(m_dns_resolver);
   m_dns_resolver = nullptr;
   m_dns_resolv_conf = nullptr;
+#endif
 
   return evio::IOBase::RefCountReleaser();
 }
 
-void AIResolver::ResolverDevice::getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup)
+void AIResolver::getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup)
 {
   int error;
+  // Call AIResolver.instance().init() at the start of main() to initialize the resolver.
+  ASSERT(m_dns_resolver);
   m_addrinfo = dns_ai_open(lookup->get_hostname().c_str(), lookup->get_servicename().c_str(), (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
   ASSERT(m_addrinfo != nullptr);  // error will still be uninitialized in this case.
   Dout(dc::notice, "ResolverDevice::getaddrinfo: dns_ai_open returned " << m_addrinfo);
@@ -184,9 +206,6 @@ std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::st
 {
   DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
 
-  if (AI_UNLIKELY(!m_resolver_device))                  // Only true the first call.
-    m_resolver_device = new ResolverDevice(true);       // true = do recursive lookups.
-
   std::shared_ptr<AILookup> handle;
   {
     utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
@@ -194,7 +213,7 @@ std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::st
   }
 
   evio::AddressInfoHints hints;
-  m_resolver_device->getaddrinfo(hints, handle.get());
+  getaddrinfo(hints, handle.get());
 
 #if 0
   // Fake a lookup for now.

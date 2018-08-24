@@ -29,6 +29,7 @@
 #include "evio/Device.h"
 #include <boost/intrusive_ptr.hpp>
 #include <memory>
+#include <array>
 #include <type_traits>
 
 namespace evio {
@@ -43,8 +44,8 @@ class AIResolver : public Singleton<AIResolver>
 {
   friend_Instance;
  private:
-  AIResolver() : m_node_memory_pool(128) { }
-  ~AIResolver() { }
+  AIResolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128) { }
+  ~AIResolver();
   AIResolver(AIResolver const&) = delete;
 
   template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of AIResolver.
@@ -52,22 +53,15 @@ class AIResolver : public Singleton<AIResolver>
   class ResolverDevice : public evio::InputDevice, public evio::OutputDevice
   {
    private:
-    struct dns_resolv_conf* m_dns_resolv_conf;
-    struct dns_resolver* m_dns_resolver;
-    struct dns_addrinfo* m_addrinfo;
-
+    friend AIResolver;
+    static void* dns_created_socket(int fd);
     static void dns_wants_to_write(void* user_data);
     static void dns_wants_to_read(void* user_data);
     static void dns_closed_fd(void* user_data);
 
    public:
-    ResolverDevice(bool recurse);
+    ResolverDevice();
     ~ResolverDevice();
-
-    void getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup);
-
-   private:
-    void run_dns();
 
    protected:
     void write_to_fd(int fd) override;    // Write thread.
@@ -75,12 +69,20 @@ class AIResolver : public Singleton<AIResolver>
     RefCountReleaser closed() override;
   };
 
-  boost::intrusive_ptr<ResolverDevice> m_resolver_device;
+  struct dns_resolv_conf* m_dns_resolv_conf;
+  struct dns_resolver* m_dns_resolver;
+  struct dns_addrinfo* m_addrinfo;
+
+  std::array<boost::intrusive_ptr<ResolverDevice>, 2> m_resolver_devices;
   utils::NodeMemoryPool m_node_memory_pool;
 
+  void getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup);
   std::shared_ptr<AILookup> do_request(std::string&& hostname, std::string&& servicename);
+  void run_dns();
 
  public:
+  void init(bool recurse);
+
   // Hostname and servicename should be std::string or char const*; the template is only to allow perfect forwarding.
   // See ai-statefultask-testsuite/src/tracked_string.cxx for the test case.
   template<typename S1, typename S2>
@@ -96,7 +98,13 @@ class AIResolver : public Singleton<AIResolver>
   void close()
   {
     DoutEntering(dc::notice, "AIResolver::close()");
-    m_resolver_device->close_input_device();
-    m_resolver_device.reset();
+    for (unsigned int d = 0; d < m_resolver_devices.size(); ++d)
+    {
+      if (m_resolver_devices[d])
+      {
+        m_resolver_devices[d]->close_input_device();
+        m_resolver_devices[d].reset();
+      }
+    }
   }
 };
