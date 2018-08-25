@@ -30,10 +30,11 @@
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-AIResolver::~AIResolver()
+AIResolver::ResolverDevice::ResolverDevice() :
+    evio::InputDevice(new evio::InputBuffer(64, 64, 64)),       // These buffers are not actually used.
+    evio::OutputDevice(new evio::OutputBuffer(64, 64, 64))
 {
-  // It is OK to call this with a nullptr.
-  dns_res_close(m_dns_resolver);
+  DoutEntering(dc::notice, "AIResolver::ResolverDevice::ResolverDevice()");
 }
 
 //static
@@ -79,11 +80,20 @@ void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-AIResolver::ResolverDevice::ResolverDevice() :
-    evio::InputDevice(new evio::InputBuffer),
-    evio::OutputDevice(new evio::OutputBuffer)
+void AIResolver::ResolverDevice::write_to_fd(int fd)
 {
-  DoutEntering(dc::notice, "AIResolver::ResolverDevice::ResolverDevice()");
+  DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
+  stop_output_device();
+  dns_so_is_writable(AIResolver::instance().m_dns_resolver, this);
+  AIResolver::instance().run_dns();
+}
+
+void AIResolver::ResolverDevice::read_from_fd(int fd)
+{
+  DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
+  stop_input_device();
+  dns_so_is_readable(AIResolver::instance().m_dns_resolver, this);
+  AIResolver::instance().run_dns();
 }
 
 void AIResolver::init(bool recurse)
@@ -138,20 +148,10 @@ void AIResolver::init(bool recurse)
   }
 }
 
-void AIResolver::ResolverDevice::write_to_fd(int fd)
+AIResolver::~AIResolver()
 {
-  DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
-  stop_output_device();
-  dns_so_is_writable(AIResolver::instance().m_dns_resolver, this);
-  AIResolver::instance().run_dns();
-}
-
-void AIResolver::ResolverDevice::read_from_fd(int fd)
-{
-  DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
-  stop_input_device();
-  dns_so_is_readable(AIResolver::instance().m_dns_resolver, this);
-  AIResolver::instance().run_dns();
+  // It is OK to call this with a nullptr.
+  dns_res_close(m_dns_resolver);
 }
 
 void AIResolver::run_dns()
@@ -181,20 +181,6 @@ void AIResolver::run_dns()
 AIResolver::ResolverDevice::~ResolverDevice()
 {
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::~ResolverDevice()");
-}
-
-evio::IOBase::RefCountReleaser AIResolver::ResolverDevice::closed()
-{
-  DoutEntering(dc::notice, "AIResolver::ResolverDevice::closed()");
-#if 0 // FIXME
-  // close() was just called. Actually close the socket using a libdns call.
-  // This function destroys everything, so set the pointers to nullptr just in case.
-  dns_res_close(m_dns_resolver);
-  m_dns_resolver = nullptr;
-  m_dns_resolv_conf = nullptr;
-#endif
-
-  return evio::IOBase::RefCountReleaser();
 }
 
 std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std::string&& servicename, evio::AddressInfoHints const& hints)

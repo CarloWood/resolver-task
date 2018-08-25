@@ -67,7 +67,6 @@ class AIResolver : public Singleton<AIResolver>
    protected:
     void write_to_fd(int fd) override;    // Write thread.
     void read_from_fd(int fd) override;   // Read thread.
-    RefCountReleaser closed() override;
   };
 
   struct dns_resolv_conf* m_dns_resolv_conf;
