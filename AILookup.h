@@ -23,30 +23,43 @@
 
 #pragma once
 
-#include "evio/SocketAddressList.h"
+#include "evio/AddressInfo.h"
 #include <string>
 #include <atomic>
+
+extern "C" {
+  const char* dns_strerror(int error);
+}
 
 class AILookup
 {
  private:
   std::string m_hostname;
   std::string m_servicename;
-  evio::SocketAddressList m_result;
+  evio::AddressInfoList m_result;
+  int m_error;
   std::atomic_bool m_ready;
 
  public:
-  AILookup(std::string&& hostname, std::string&& servicename) : m_hostname(std::move(hostname)), m_servicename(std::move(servicename)) { }
+  AILookup(std::string&& hostname, std::string&& servicename) : m_hostname(std::move(hostname)), m_servicename(std::move(servicename)), m_error(0), m_ready(false) { }
 
   std::string const& get_hostname() const { return m_hostname; }
   std::string const& get_servicename() const { return m_servicename; }
 
-  void set_result(evio::SocketAddressList&& result)
+  void set_result(evio::AddressInfoList&& result)
   {
     m_result = std::move(result);
     m_ready.store(true, std::memory_order_release);
   }
 
+  void set_error(int error)
+  {
+    m_error = error;
+    m_ready.store(true, std::memory_order_release);
+  }
+
   bool is_ready() const { return m_ready.load(std::memory_order_acquire); }
-  evio::SocketAddressList const& get_result() const { return m_result; }
+  evio::AddressInfoList const& get_result() const { return m_result; }
+  bool success() const { return m_error == 0; }
+  char const* get_error() const { return dns_strerror(m_error); }
 };

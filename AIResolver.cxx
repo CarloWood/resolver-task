@@ -156,16 +156,25 @@ void AIResolver::ResolverDevice::read_from_fd(int fd)
 
 void AIResolver::run_dns()
 {
-  evio::AddressInfoList addrinfo_list(nullptr);
+  int error;
   for (;;)
   {
-    // Give CPU to libdns.
-    int error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
+    struct addrinfo* addrinfo;
 
-    if (error != 0)
+    // Give CPU to libdns until it returns a non-zero value.
+    if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
       break;
 
-    Dout(dc::notice, "Result: " << addrinfo_list);
+    m_addrinfo.add(addrinfo);
+  }
+
+  // This sets m_addrinfo to null again - allowing for the next lookup to start.
+  if (error == ENOENT)
+    m_lookup->set_result(std::move(m_addrinfo));
+  else if (error != EAGAIN)
+  {
+    m_lookup->set_error(error);
+    m_addrinfo.clear();
   }
 }
 
@@ -188,44 +197,29 @@ evio::IOBase::RefCountReleaser AIResolver::ResolverDevice::closed()
   return evio::IOBase::RefCountReleaser();
 }
 
-void AIResolver::getaddrinfo(evio::AddressInfoHints const& hints, AILookup const* lookup)
-{
-  int error;
-  // Call AIResolver.instance().init() at the start of main() to initialize the resolver.
-  ASSERT(m_dns_resolver);
-  m_addrinfo = dns_ai_open(lookup->get_hostname().c_str(), lookup->get_servicename().c_str(), (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
-  ASSERT(m_addrinfo != nullptr);  // error will still be uninitialized in this case.
-  Dout(dc::notice, "ResolverDevice::getaddrinfo: dns_ai_open returned " << m_addrinfo);
-  evio::AddressInfoList addrinfo_list(nullptr);
-  error = dns_ai_nextent(&addrinfo_list.raw_ref(), m_addrinfo);
-  // libdns just called dns_wants_to_write, and then always returns DNS_EAGAIN.
-  ASSERT(error == EAGAIN);
-}
-
-std::shared_ptr<AILookup> AIResolver::do_request(std::string&& hostname, std::string&& servicename)
+std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std::string&& servicename, evio::AddressInfoHints const& hints)
 {
   DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
 
-  std::shared_ptr<AILookup> handle;
-  {
-    utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
-    handle = std::allocate_shared<AILookup>(node_allocator, std::move(hostname), std::move(servicename));
-  }
+  utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
+  m_lookup = std::allocate_shared<AILookup>(node_allocator, std::move(hostname), std::move(servicename));
 
-  evio::AddressInfoHints hints;
-  getaddrinfo(hints, handle.get());
+  // Call AIResolver.instance().init() at the start of main() to initialize the resolver.
+  ASSERT(m_dns_resolver);
 
-#if 0
-  // Fake a lookup for now.
-  evio::SocketAddress sa1("127.0.0.1:80");
-  evio::SocketAddress sa2("127.0.0.2:80");
-  evio::SocketAddressList list;
-  list += sa1;
-  list += sa2;
-  handle->set_result(std::move(list));
-#endif
+  int error = 0;        // Must be set to 0.
+  m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), m_lookup->get_servicename().c_str(), (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
 
-  return handle;
+  // FIXME: throw error.
+  if (!m_dns_addrinfo)
+    DoutFatal(dc::fatal, dns_strerror(error) << '.');
+  // A previous request should already have been moved to its corresponding AILookup object in run_dns(), before we get here again.
+  ASSERT(m_addrinfo.empty());
+
+  // Run libdns to actually get things started.
+  run_dns();
+
+  return m_lookup;
 }
 
 namespace {

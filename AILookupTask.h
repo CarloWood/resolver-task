@@ -24,7 +24,7 @@
 #pragma once
 
 #include "statefultask/AIStatefulTask.h"
-#include "evio/SocketAddressList.h"
+#include "evio/AddressInfo.h"
 #include <atomic>
 
 /*!
@@ -72,7 +72,7 @@ class AILookupTask : public AIStatefulTask
   std::atomic_bool mLookupFinished;     //!< Set to true after the hostname lookup finished.
   std::string mNodeName;                //!< Input variable: the node name that needs to be resolved.
   std::string mServiceName;             //!< Input variable: the service name that needs to be resolved.
-  evio::SocketAddressList mResult;      //!< The result after successful lookup.
+  evio::AddressInfoList mResult;        //!< The result after successful lookup.
 
  public:
   /*!
@@ -113,9 +113,9 @@ class AILookupTask : public AIStatefulTask
   /*!
    * @brief Get the result.
    *
-   * @returns a SocketAddressList.
+   * @returns a AddressInfoList.
    */
-  evio::SocketAddressList const& get_result() const { return mResult; }
+  evio::AddressInfoList const& get_result() const { return mResult; }
 
  protected:
   //! Call finish() (or abort()), not delete.
