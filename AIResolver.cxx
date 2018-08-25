@@ -31,8 +31,7 @@
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
 AIResolver::ResolverDevice::ResolverDevice() :
-    evio::InputDevice(new evio::InputBuffer(64, 64, 64)),       // These buffers are not actually used.
-    evio::OutputDevice(new evio::OutputBuffer(64, 64, 64))
+  evio::InputDevice(nullptr), evio::OutputDevice(nullptr)       // ResolverDevice doesn't use (our) buffers.
 {
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::ResolverDevice()");
 }
