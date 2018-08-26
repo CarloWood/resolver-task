@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implementation of AIResolver.
+ * @brief Implementation of Resolver.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -22,21 +22,23 @@
  */
 
 #include "sys.h"
-#include "AIResolver.h"
+#include "Resolver.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
 
+namespace resolver {
+
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-AIResolver::ResolverDevice::ResolverDevice() :
+Resolver::ResolverDevice::ResolverDevice() :
   evio::InputDevice(nullptr), evio::OutputDevice(nullptr)       // ResolverDevice doesn't use (our) buffers.
 {
-  DoutEntering(dc::notice, "AIResolver::ResolverDevice::ResolverDevice()");
+  DoutEntering(dc::notice, "Resolver::ResolverDevice::ResolverDevice()");
 }
 
 //static
-void* AIResolver::ResolverDevice::dns_created_socket(int fd)
+void* Resolver::ResolverDevice::dns_created_socket(int fd)
 {
   DoutEntering(dc::notice, "ResolverDevice::dns_created_socket(" << fd << ")");
   ResolverDevice* resolver_device = new ResolverDevice();
@@ -49,7 +51,7 @@ void* AIResolver::ResolverDevice::dns_created_socket(int fd)
 }
 
 //static
-void AIResolver::ResolverDevice::dns_wants_to_write(void* user_data)
+void Resolver::ResolverDevice::dns_wants_to_write(void* user_data)
 {
   DoutEntering(dc::notice, "dns_wants_to_write()");
   ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
@@ -57,7 +59,7 @@ void AIResolver::ResolverDevice::dns_wants_to_write(void* user_data)
 }
 
 //static
-void AIResolver::ResolverDevice::dns_wants_to_read(void* user_data)
+void Resolver::ResolverDevice::dns_wants_to_read(void* user_data)
 {
   DoutEntering(dc::notice, "dns_wants_to_read()");
   ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
@@ -65,7 +67,7 @@ void AIResolver::ResolverDevice::dns_wants_to_read(void* user_data)
 }
 
 //static
-void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
+void Resolver::ResolverDevice::dns_closed_fd(void* user_data)
 {
   DoutEntering(dc::notice, "dns_closed_fd()");
   ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
@@ -78,23 +80,23 @@ void AIResolver::ResolverDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-void AIResolver::ResolverDevice::write_to_fd(int fd)
+void Resolver::ResolverDevice::write_to_fd(int fd)
 {
-  DoutEntering(dc::evio, "AIResolver::ResolverDevice::write_to_fd(" << fd << ")");
+  DoutEntering(dc::evio, "Resolver::ResolverDevice::write_to_fd(" << fd << ")");
   stop_output_device();
-  dns_so_is_writable(AIResolver::instance().m_dns_resolver, this);
-  AIResolver::instance().run_dns();
+  dns_so_is_writable(Resolver::instance().m_dns_resolver, this);
+  Resolver::instance().run_dns();
 }
 
-void AIResolver::ResolverDevice::read_from_fd(int fd)
+void Resolver::ResolverDevice::read_from_fd(int fd)
 {
-  DoutEntering(dc::evio, "AIResolver::ResolverDevice::read_from_fd(" << fd << ")");
+  DoutEntering(dc::evio, "Resolver::ResolverDevice::read_from_fd(" << fd << ")");
   stop_input_device();
-  dns_so_is_readable(AIResolver::instance().m_dns_resolver, this);
-  AIResolver::instance().run_dns();
+  dns_so_is_readable(Resolver::instance().m_dns_resolver, this);
+  Resolver::instance().run_dns();
 }
 
-void AIResolver::init(bool recurse)
+void Resolver::init(bool recurse)
 {
   // Initialize dns.
   static struct dns_options const opts = { { nullptr, nullptr }, dns_options::DNS_LIBEVENT };
@@ -146,13 +148,13 @@ void AIResolver::init(bool recurse)
   }
 }
 
-AIResolver::~AIResolver()
+Resolver::~Resolver()
 {
   // It is OK to call this with a nullptr.
   dns_res_close(m_dns_resolver);
 }
 
-void AIResolver::run_dns()
+void Resolver::run_dns()
 {
   int error;
   for (;;)
@@ -176,19 +178,19 @@ void AIResolver::run_dns()
   }
 }
 
-AIResolver::ResolverDevice::~ResolverDevice()
+Resolver::ResolverDevice::~ResolverDevice()
 {
-  DoutEntering(dc::notice, "AIResolver::ResolverDevice::~ResolverDevice()");
+  DoutEntering(dc::notice, "Resolver::ResolverDevice::~ResolverDevice()");
 }
 
-std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints)
+std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints)
 {
-  DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
+  DoutEntering(dc::notice, "Resolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
 
-  utils::Allocator<AILookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
-  m_lookup = std::allocate_shared<AILookup>(node_allocator, std::move(hostname), std::move(servicename));
+  utils::Allocator<Lookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
+  m_lookup = std::allocate_shared<Lookup>(node_allocator, std::move(hostname), std::move(servicename));
 
-  // Call AIResolver.instance().init() at the start of main() to initialize the resolver.
+  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
   ASSERT(m_dns_resolver);
 
   int error = 0;        // Must be set to 0.
@@ -197,7 +199,7 @@ std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std:
   // FIXME: throw error.
   if (!m_dns_addrinfo)
     DoutFatal(dc::fatal, dns_strerror(error) << '.');
-  // A previous request should already have been moved to its corresponding AILookup object in run_dns(), before we get here again.
+  // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
   ASSERT(m_addrinfo.empty());
 
   // Run libdns to actually get things started.
@@ -206,6 +208,8 @@ std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std:
   return m_lookup;
 }
 
+} // namespace resolver
+
 namespace {
-SingletonInstance<AIResolver> dummy __attribute__ ((__unused__));
+SingletonInstance<resolver::Resolver> dummy __attribute__ ((__unused__));
 } // namespace

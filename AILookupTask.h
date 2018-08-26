@@ -72,7 +72,7 @@ class AILookupTask : public AIStatefulTask
   std::atomic_bool mLookupFinished;     //!< Set to true after the hostname lookup finished.
   std::string mNodeName;                //!< Input variable: the node name that needs to be resolved.
   std::string mServiceName;             //!< Input variable: the service name that needs to be resolved.
-  AddressInfoList mResult;              //!< The result after successful lookup.
+  resolver::AddressInfoList mResult;    //!< The result after successful lookup.
 
  public:
   /*!
@@ -115,7 +115,7 @@ class AILookupTask : public AIStatefulTask
    *
    * @returns a AddressInfoList.
    */
-  AddressInfoList const& get_result() const { return mResult; }
+  resolver::AddressInfoList const& get_result() const { return mResult; }
 
  protected:
   //! Call finish() (or abort()), not delete.

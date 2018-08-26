@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Resolve a hostname. Declaration of class AILookup.
+ * @brief Resolve a hostname. Declaration of class Lookup.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -31,7 +31,9 @@ extern "C" {
   const char* dns_strerror(int error);
 }
 
-class AILookup
+namespace resolver {
+
+class Lookup
 {
  private:
   std::string m_hostname;
@@ -41,7 +43,7 @@ class AILookup
   std::atomic_bool m_ready;
 
  public:
-  AILookup(std::string&& hostname, std::string&& servicename) : m_hostname(std::move(hostname)), m_servicename(std::move(servicename)), m_error(0), m_ready(false) { }
+  Lookup(std::string&& hostname, std::string&& servicename) : m_hostname(std::move(hostname)), m_servicename(std::move(servicename)), m_error(0), m_ready(false) { }
 
   std::string const& get_hostname() const { return m_hostname; }
   std::string const& get_servicename() const { return m_servicename; }
@@ -63,3 +65,5 @@ class AILookup
   bool success() const { return m_error == 0; }
   char const* get_error() const { return dns_strerror(m_error); }
 };
+
+} // namespace resolver

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implementation of AILookup.
+ * @brief Implementation of Lookup.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -22,4 +22,4 @@
  */
 
 #include "sys.h"
-#include "AILookup.h"
+#include "Lookup.h"

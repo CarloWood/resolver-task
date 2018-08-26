@@ -8,6 +8,8 @@
 #include <cstring>
 #include <cstdlib>
 
+namespace resolver {
+
 class AddressInfoHints
 {
  private:
@@ -76,3 +78,5 @@ class AddressInfoList : public AddressInfo
   void clear();
   void add(struct addrinfo* addrinfo);
 };
+
+} // namespace resolver

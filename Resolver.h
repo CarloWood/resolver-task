@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Singleton for DNS lookups. Declaration of class AIResolver.
+ * @brief Singleton for DNS lookups. Declaration of class Resolver.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "AILookup.h"
+#include "Lookup.h"
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
@@ -32,26 +32,28 @@
 #include <array>
 #include <type_traits>
 
-class AddressInfoHints;
-
 struct dns_resolv_conf;
 struct dns_resolver;
 struct dns_addrinfo;
 
-class AIResolver : public Singleton<AIResolver>
+namespace resolver {
+
+class AddressInfoHints;
+
+class Resolver : public Singleton<Resolver>
 {
   friend_Instance;
  private:
-  AIResolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128) { }
-  ~AIResolver();
-  AIResolver(AIResolver const&) = delete;
+  Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128) { }
+  ~Resolver();
+  Resolver(Resolver const&) = delete;
 
-  template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of AIResolver.
+  template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of Resolver.
 
   class ResolverDevice : public evio::InputDevice, public evio::OutputDevice
   {
    private:
-    friend AIResolver;
+    friend Resolver;
     static void* dns_created_socket(int fd);
     static void dns_wants_to_write(void* user_data);
     static void dns_wants_to_read(void* user_data);
@@ -72,9 +74,9 @@ class AIResolver : public Singleton<AIResolver>
   std::array<boost::intrusive_ptr<ResolverDevice>, 2> m_resolver_devices;
   utils::NodeMemoryPool m_node_memory_pool;
   AddressInfoList m_addrinfo;
-  std::shared_ptr<AILookup> m_lookup;
+  std::shared_ptr<Lookup> m_lookup;
 
-  std::shared_ptr<AILookup> queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints);
+  std::shared_ptr<Lookup> queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints);
   void run_dns();
 
  public:
@@ -86,7 +88,7 @@ class AIResolver : public Singleton<AIResolver>
   typename std::enable_if<
       (std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value) &&
       (std::is_same<S2, std::string>::value || std::is_convertible<S2, std::string>::value),
-      std::shared_ptr<AILookup>>::type
+      std::shared_ptr<Lookup>>::type
   getaddrinfo(S1&& node, S2&& service, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_request(std::forward<std::string>(node), std::forward<std::string>(service), hints);
@@ -94,7 +96,7 @@ class AIResolver : public Singleton<AIResolver>
 
   void close()
   {
-    DoutEntering(dc::notice, "AIResolver::close()");
+    DoutEntering(dc::notice, "Resolver::close()");
     for (unsigned int d = 0; d < m_resolver_devices.size(); ++d)
     {
       if (m_resolver_devices[d])
@@ -105,3 +107,5 @@ class AIResolver : public Singleton<AIResolver>
     }
   }
 };
+
+} // namespace resolver
