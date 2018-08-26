@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "evio/AddressInfo.h"
+#include "AddressInfo.h"
 #include <string>
 #include <atomic>
 
@@ -36,7 +36,7 @@ class AILookup
  private:
   std::string m_hostname;
   std::string m_servicename;
-  evio::AddressInfoList m_result;
+  AddressInfoList m_result;
   int m_error;
   std::atomic_bool m_ready;
 
@@ -46,7 +46,7 @@ class AILookup
   std::string const& get_hostname() const { return m_hostname; }
   std::string const& get_servicename() const { return m_servicename; }
 
-  void set_result(evio::AddressInfoList&& result)
+  void set_result(AddressInfoList&& result)
   {
     m_result = std::move(result);
     m_ready.store(true, std::memory_order_release);
@@ -59,7 +59,7 @@ class AILookup
   }
 
   bool is_ready() const { return m_ready.load(std::memory_order_acquire); }
-  evio::AddressInfoList const& get_result() const { return m_result; }
+  AddressInfoList const& get_result() const { return m_result; }
   bool success() const { return m_error == 0; }
   char const* get_error() const { return dns_strerror(m_error); }
 };

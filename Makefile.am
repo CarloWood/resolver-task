@@ -10,7 +10,9 @@ SOURCES = \
 	AILookupTask.h \
 	AILookupTask.cxx \
 	AILookup.h \
-	AILookup.cxx
+	AILookup.cxx \
+	AddressInfo.h \
+	AddressInfo.cxx
 
 libresolvertask_la_SOURCES = ${SOURCES}
 libresolvertask_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@

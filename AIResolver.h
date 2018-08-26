@@ -27,15 +27,12 @@
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
-#include "evio/AddressInfo.h"
 #include <boost/intrusive_ptr.hpp>
 #include <memory>
 #include <array>
 #include <type_traits>
 
-namespace evio {
 class AddressInfoHints;
-} // namespace evio;
 
 struct dns_resolv_conf;
 struct dns_resolver;
@@ -74,10 +71,10 @@ class AIResolver : public Singleton<AIResolver>
   struct dns_addrinfo* m_dns_addrinfo;
   std::array<boost::intrusive_ptr<ResolverDevice>, 2> m_resolver_devices;
   utils::NodeMemoryPool m_node_memory_pool;
-  evio::AddressInfoList m_addrinfo;
+  AddressInfoList m_addrinfo;
   std::shared_ptr<AILookup> m_lookup;
 
-  std::shared_ptr<AILookup> queue_request(std::string&& hostname, std::string&& servicename, evio::AddressInfoHints const& hints);
+  std::shared_ptr<AILookup> queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints);
   void run_dns();
 
  public:
@@ -90,7 +87,7 @@ class AIResolver : public Singleton<AIResolver>
       (std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value) &&
       (std::is_same<S2, std::string>::value || std::is_convertible<S2, std::string>::value),
       std::shared_ptr<AILookup>>::type
-  getaddrinfo(S1&& node, S2&& service, evio::AddressInfoHints const& hints = evio::AddressInfoHints())
+  getaddrinfo(S1&& node, S2&& service, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_request(std::forward<std::string>(node), std::forward<std::string>(service), hints);
   }

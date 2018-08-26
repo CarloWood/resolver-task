@@ -23,7 +23,6 @@
 
 #include "sys.h"
 #include "AIResolver.h"
-#include "evio/AddressInfo.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
@@ -182,7 +181,7 @@ AIResolver::ResolverDevice::~ResolverDevice()
   DoutEntering(dc::notice, "AIResolver::ResolverDevice::~ResolverDevice()");
 }
 
-std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std::string&& servicename, evio::AddressInfoHints const& hints)
+std::shared_ptr<AILookup> AIResolver::queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints)
 {
   DoutEntering(dc::notice, "AIResolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
 
