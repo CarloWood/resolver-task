@@ -31,46 +31,46 @@ namespace resolver {
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-Resolver::ResolverDevice::ResolverDevice() :
-  evio::InputDevice(nullptr), evio::OutputDevice(nullptr)       // ResolverDevice doesn't use (our) buffers.
+Resolver::SocketDevice::SocketDevice() :
+  evio::InputDevice(nullptr), evio::OutputDevice(nullptr)       // SocketDevice doesn't use (our) buffers.
 {
-  DoutEntering(dc::notice, "Resolver::ResolverDevice::ResolverDevice()");
+  DoutEntering(dc::notice, "Resolver::SocketDevice::SocketDevice()");
 }
 
 //static
-void* Resolver::ResolverDevice::dns_created_socket(int fd)
+void* Resolver::SocketDevice::dns_created_socket(int fd)
 {
-  DoutEntering(dc::notice, "ResolverDevice::dns_created_socket(" << fd << ")");
-  ResolverDevice* resolver_device = new ResolverDevice();
+  DoutEntering(dc::notice, "SocketDevice::dns_created_socket(" << fd << ")");
+  SocketDevice* resolver_device = new SocketDevice();
   resolver_device->init(fd);
   resolver_device->m_flags |= INTERNAL_FDS_DONT_CLOSE; // Let the closing be done by libdns.
-  // Increment ref count to stop this ResolverDevice from being deleted while being used by libdns.
+  // Increment ref count to stop this SocketDevice from being deleted while being used by libdns.
   intrusive_ptr_add_ref(resolver_device);
   Dout(dc::io, "Incremented ref count (now " << resolver_device->ref_count() << ") [" << (void*)static_cast<IOBase*>(resolver_device) << ']');
   return resolver_device;
 }
 
 //static
-void Resolver::ResolverDevice::dns_wants_to_write(void* user_data)
+void Resolver::SocketDevice::dns_wants_to_write(void* user_data)
 {
   DoutEntering(dc::notice, "dns_wants_to_write()");
-  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  SocketDevice* self = static_cast<SocketDevice*>(user_data);
   self->start_output_device();
 }
 
 //static
-void Resolver::ResolverDevice::dns_wants_to_read(void* user_data)
+void Resolver::SocketDevice::dns_wants_to_read(void* user_data)
 {
   DoutEntering(dc::notice, "dns_wants_to_read()");
-  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  SocketDevice* self = static_cast<SocketDevice*>(user_data);
   self->start_input_device();
 }
 
 //static
-void Resolver::ResolverDevice::dns_closed_fd(void* user_data)
+void Resolver::SocketDevice::dns_closed_fd(void* user_data)
 {
   DoutEntering(dc::notice, "dns_closed_fd()");
-  ResolverDevice* self = static_cast<ResolverDevice*>(user_data);
+  SocketDevice* self = static_cast<SocketDevice*>(user_data);
   ASSERT(false); // When do we get here?
   RefCountReleaser releaser;
   // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
@@ -80,17 +80,17 @@ void Resolver::ResolverDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-void Resolver::ResolverDevice::write_to_fd(int fd)
+void Resolver::SocketDevice::write_to_fd(int fd)
 {
-  DoutEntering(dc::evio, "Resolver::ResolverDevice::write_to_fd(" << fd << ")");
+  DoutEntering(dc::evio, "Resolver::SocketDevice::write_to_fd(" << fd << ")");
   stop_output_device();
   dns_so_is_writable(Resolver::instance().m_dns_resolver, this);
   Resolver::instance().run_dns();
 }
 
-void Resolver::ResolverDevice::read_from_fd(int fd)
+void Resolver::SocketDevice::read_from_fd(int fd)
 {
-  DoutEntering(dc::evio, "Resolver::ResolverDevice::read_from_fd(" << fd << ")");
+  DoutEntering(dc::evio, "Resolver::SocketDevice::read_from_fd(" << fd << ")");
   stop_input_device();
   dns_so_is_readable(Resolver::instance().m_dns_resolver, this);
   Resolver::instance().run_dns();
@@ -134,7 +134,7 @@ void Resolver::init(bool recurse)
       { error_function = "dns_res_open"; break; }
 
     // Set callback functions; this calls dns_created_socket for the already created UDP socket before it returns.
-    dns_set_so_hooks(m_dns_resolver, &ResolverDevice::dns_created_socket, &ResolverDevice::dns_wants_to_write, &ResolverDevice::dns_wants_to_read, &ResolverDevice::dns_closed_fd);
+    dns_set_so_hooks(m_dns_resolver, &SocketDevice::dns_created_socket, &SocketDevice::dns_wants_to_write, &SocketDevice::dns_wants_to_read, &SocketDevice::dns_closed_fd);
   }
   while (0);
   if (error_function)
@@ -178,32 +178,54 @@ void Resolver::run_dns()
   }
 }
 
-Resolver::ResolverDevice::~ResolverDevice()
+Resolver::SocketDevice::~SocketDevice()
 {
-  DoutEntering(dc::notice, "Resolver::ResolverDevice::~ResolverDevice()");
+  DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
 }
 
-std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints)
+bool Resolver::CacheEqualTo::operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const
 {
-  DoutEntering(dc::notice, "Resolver::do_request(\"" << hostname << "\", \"" << servicename << "\")");
+  // Assuming we only compare Lookup objects whose hash is equal, it is
+  // already pretty likely that they are equal and we will have to compare
+  // everything; if they are not equal then it is more likely than normal
+  // that the service and/or hints are unequal; and because those are the
+  // fastest to compare we start with those.
+  return lookup1->get_hints() == lookup2->get_hints() &&
+         lookup1->get_service().is_cache_equal_to(lookup2->get_service()) &&    // Do is_cache_equal_to first assuming the most likely: that they are both numeric.
+         lookup1->get_hostname() == lookup2->get_hostname();
+}
+
+std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, Service const& service, AddressInfoHints const& hints)
+{
+  DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << service << ", " << hints << ")");
 
   utils::Allocator<Lookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
-  m_lookup = std::allocate_shared<Lookup>(node_allocator, std::move(hostname), std::move(servicename));
+  auto insert_result = m_cache.insert(std::allocate_shared<Lookup>(node_allocator, std::move(hostname), service, hints.hash_seed()));
 
-  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
-  ASSERT(m_dns_resolver);
+  m_lookup = *insert_result.first;
 
-  int error = 0;        // Must be set to 0.
-  m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), m_lookup->get_servicename().c_str(), (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+  // If this was a new Lookup, query the DNS server(s).
+  if (insert_result.second)
+  {
+    Dout(dc::notice, "Insert into cache took place.");
+    // Call Resolver.instance().init() at the start of main() to initialize the resolver.
+    ASSERT(m_dns_resolver);
 
-  // FIXME: throw error.
-  if (!m_dns_addrinfo)
-    DoutFatal(dc::fatal, dns_strerror(error) << '.');
-  // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
-  ASSERT(m_addrinfo.empty());
+    int error = 0;        // Must be set to 0.
+    char const* service_name = m_lookup->get_service().is_numeric() ? "0" : m_lookup->get_service().get_name();
+    m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), service_name, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
 
-  // Run libdns to actually get things started.
-  run_dns();
+    // FIXME: throw error.
+    if (!m_dns_addrinfo)
+      DoutFatal(dc::fatal, dns_strerror(error) << '.');
+    // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
+    ASSERT(m_addrinfo.empty());
+
+    // Run libdns to actually get things started.
+    run_dns();
+  }
+  else
+    Dout(dc::notice, "Found cached entry!");
 
   return m_lookup;
 }

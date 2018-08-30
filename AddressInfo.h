@@ -26,6 +26,18 @@ class AddressInfoHints
     m_hints{ flags, family, socktype, protocol, 0, nullptr, nullptr, nullptr } { }
 
   struct addrinfo const* as_addrinfo() const { return &m_hints; }
+
+  uint32_t hash_seed() const
+  {
+    // Each fits in one or two bytes; but use XOR just in case.
+    uint32_t seed = m_hints.ai_flags;                   // 11 bits.
+    seed = (seed << 12) ^ m_hints.ai_family;            // 6 bits (really just 4).
+    seed = (seed << 7) ^ m_hints.ai_socktype;           // 4 bits (really just 2).
+    seed = (seed << 5) ^ m_hints.ai_protocol;           // 6 bits (really just 4).
+    return seed;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, AddressInfoHints const& hints);
 };
 
 class AddressInfo

@@ -27,9 +27,11 @@
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
+#include "farmhash/src/farmhash.h"
 #include <boost/intrusive_ptr.hpp>
 #include <memory>
 #include <array>
+#include <unordered_set>
 #include <type_traits>
 
 struct dns_resolv_conf;
@@ -50,7 +52,7 @@ class Resolver : public Singleton<Resolver>
 
   template<class Tp> struct Alloc;      // Forward declaration so that this struct is a friend of Resolver.
 
-  class ResolverDevice : public evio::InputDevice, public evio::OutputDevice
+  class SocketDevice : public evio::InputDevice, public evio::OutputDevice
   {
    private:
     friend Resolver;
@@ -60,49 +62,61 @@ class Resolver : public Singleton<Resolver>
     static void dns_closed_fd(void* user_data);
 
    public:
-    ResolverDevice();
-    ~ResolverDevice();
+    SocketDevice();
+    ~SocketDevice();
 
    protected:
     void write_to_fd(int fd) override;    // Write thread.
     void read_from_fd(int fd) override;   // Read thread.
   };
 
+  struct CacheHash
+  {
+    uint64_t operator()(std::shared_ptr<Lookup> const& lookup) const
+    {
+      return util::Hash64WithSeeds(lookup->get_hostname().data(), lookup->get_hostname().length(), lookup->get_service().hash_seed(), lookup->get_hints());
+    }
+  };
+
+  struct CacheEqualTo
+  {
+    bool operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const;
+  };
+
   struct dns_resolv_conf* m_dns_resolv_conf;
   struct dns_resolver* m_dns_resolver;
   struct dns_addrinfo* m_dns_addrinfo;
-  std::array<boost::intrusive_ptr<ResolverDevice>, 2> m_resolver_devices;
+  std::array<boost::intrusive_ptr<SocketDevice>, 2> m_socket_devices;
   utils::NodeMemoryPool m_node_memory_pool;
   AddressInfoList m_addrinfo;
   std::shared_ptr<Lookup> m_lookup;
+  std::unordered_set<std::shared_ptr<Lookup>, CacheHash, CacheEqualTo> m_cache;
 
-  std::shared_ptr<Lookup> queue_request(std::string&& hostname, std::string&& servicename, AddressInfoHints const& hints);
+  std::shared_ptr<Lookup> queue_request(std::string&& hostname, Service const& service, AddressInfoHints const& hints);
   void run_dns();
 
  public:
   void init(bool recurse);
 
-  // Hostname and servicename should be std::string or char const*; the template is only to allow perfect forwarding.
-  // See ai-statefultask-testsuite/src/tracked_string.cxx for the test case.
-  template<typename S1, typename S2>
+  // Hostname should be std::string or char const*; the template is only to allow perfect forwarding.
+  template<typename S1>
   typename std::enable_if<
-      (std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value) &&
-      (std::is_same<S2, std::string>::value || std::is_convertible<S2, std::string>::value),
+      std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       std::shared_ptr<Lookup>>::type
-  getaddrinfo(S1&& node, S2&& service, AddressInfoHints const& hints = AddressInfoHints())
+  getaddrinfo(S1&& node, Service const& service, AddressInfoHints const& hints = AddressInfoHints())
   {
-    return queue_request(std::forward<std::string>(node), std::forward<std::string>(service), hints);
+    return queue_request(std::forward<std::string>(node), service, hints);
   }
 
   void close()
   {
     DoutEntering(dc::notice, "Resolver::close()");
-    for (unsigned int d = 0; d < m_resolver_devices.size(); ++d)
+    for (unsigned int d = 0; d < m_socket_devices.size(); ++d)
     {
-      if (m_resolver_devices[d])
+      if (m_socket_devices[d])
       {
-        m_resolver_devices[d]->close_input_device();
-        m_resolver_devices[d].reset();
+        m_socket_devices[d]->close_input_device();
+        m_socket_devices[d].reset();
       }
     }
   }

@@ -24,6 +24,8 @@
 #pragma once
 
 #include "AddressInfo.h"
+#include "Service.h"
+#include "utils/itoa.h"
 #include <string>
 #include <atomic>
 
@@ -37,16 +39,19 @@ class Lookup
 {
  private:
   std::string m_hostname;
-  std::string m_servicename;
+  Service m_service;
   AddressInfoList m_result;
   int m_error;
   std::atomic_bool m_ready;
+  uint32_t m_hints;     // We only store the hash_seed of the hints, because that contains all bits, but is considerately smaller.
 
  public:
-  Lookup(std::string&& hostname, std::string&& servicename) : m_hostname(std::move(hostname)), m_servicename(std::move(servicename)), m_error(0), m_ready(false) { }
+  Lookup(std::string&& hostname, Service const& service, uint32_t hints) :
+      m_hostname(std::move(hostname)), m_service(service), m_error(0), m_ready(false), m_hints(hints) { }
 
   std::string const& get_hostname() const { return m_hostname; }
-  std::string const& get_servicename() const { return m_servicename; }
+  Service const& get_service() const { return m_service; }
+  uint32_t get_hints() const { return m_hints; }
 
   void set_result(AddressInfoList&& result)
   {

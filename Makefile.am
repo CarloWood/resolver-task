@@ -12,7 +12,9 @@ SOURCES = \
 	Lookup.h \
 	Lookup.cxx \
 	AddressInfo.h \
-	AddressInfo.cxx
+	AddressInfo.cxx \
+	Service.h \
+	Service.cxx
 
 libresolvertask_la_SOURCES = ${SOURCES}
 libresolvertask_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@

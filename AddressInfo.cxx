@@ -66,14 +66,23 @@ std::string ai_protocol_str(int protocol)
 
 } // namespace
 
+std::ostream& operator<<(std::ostream& os, AddressInfoHints const& hints)
+{
+  os << "AddressInfoHints:{flags:" << ai_flags_str(hints.m_hints.ai_flags) <<
+                       ", family:" << ai_family_str(hints.m_hints.ai_family) <<
+                     ", socktype:" << ai_socktype_str(hints.m_hints.ai_socktype) <<
+                     ", protocol:" << ai_protocol_str(hints.m_hints.ai_protocol);
+  return os << '}';
+}
+
 std::ostream& operator<<(std::ostream& os, AddressInfo const& addrinfo)
 {
   os << "AddressInfo:{flags:" << ai_flags_str(addrinfo.m_addrinfo->ai_flags) <<
-                   ", family:" << ai_family_str(addrinfo.m_addrinfo->ai_family) <<
-                 ", socktype:" << ai_socktype_str(addrinfo.m_addrinfo->ai_socktype) <<
-                 ", protocol:" << ai_protocol_str(addrinfo.m_addrinfo->ai_protocol) <<
-                  ", addrlen:" << addrinfo.m_addrinfo->ai_addrlen <<
-                     ", addr:";
+                  ", family:" << ai_family_str(addrinfo.m_addrinfo->ai_family) <<
+                ", socktype:" << ai_socktype_str(addrinfo.m_addrinfo->ai_socktype) <<
+                ", protocol:" << ai_protocol_str(addrinfo.m_addrinfo->ai_protocol) <<
+                 ", addrlen:" << addrinfo.m_addrinfo->ai_addrlen <<
+                    ", addr:";
   if (addrinfo.m_addrinfo->ai_addr)
     os << evio::SocketAddress(addrinfo.m_addrinfo->ai_addr);
   else
