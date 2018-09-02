@@ -23,10 +23,7 @@
 
 #pragma once
 
-#include "AddressInfo.h"
-#include "utils/itoa.h"
-#include <string>
-#include <atomic>
+#include "Resolver.h"
 
 extern "C" {
   const char* dns_strerror(int error);
@@ -36,36 +33,27 @@ namespace resolver {
 
 class Lookup
 {
+  using HostnameCache = Resolver::HostnameCache;
+
  private:
-  std::string m_hostname;
-  AddressInfoList m_result;
-  int m_error;
-  std::atomic_bool m_ready;
-  uint32_t m_hints;     // We only store the hash_seed of the hints, because that contains all bits, but is considerately smaller.
+   std::shared_ptr<HostnameCache> m_hostname_cache;
+   in_port_t m_port;
 
  public:
-  Lookup(std::string&& hostname, uint32_t hints) :
-      m_hostname(std::move(hostname)), m_error(0), m_ready(false), m_hints(hints) { }
+  Lookup(std::shared_ptr<HostnameCache> const& hostname_cache, in_port_t port) :
+      m_hostname_cache(hostname_cache), m_port(port) { }
 
-  std::string const& get_hostname() const { return m_hostname; }
-  uint32_t get_hints() const { return m_hints; }
+  Lookup(std::shared_ptr<HostnameCache>&& hostname_cache, in_port_t port) :
+      m_hostname_cache(std::move(hostname_cache)), m_port(port) { }
 
-  void set_result(AddressInfoList&& result)
-  {
-    m_result = std::move(result);
-    m_ready.store(true, std::memory_order_release);
-  }
+  std::string const& get_hostname() const { return m_hostname_cache->str; }
+  uint32_t get_hints() const { return m_hostname_cache->hints; }
 
-  void set_error(int error)
-  {
-    m_error = error;
-    m_ready.store(true, std::memory_order_release);
-  }
-
-  bool is_ready() const { return m_ready.load(std::memory_order_acquire); }
-  AddressInfoList const& get_result() const { return m_result; }
-  bool success() const { return m_error == 0; }
-  char const* get_error() const { return dns_strerror(m_error); }
+  bool is_ready() const { return m_hostname_cache->ready.load(std::memory_order_acquire); }
+  AddressInfoList const& get_result() const { return m_hostname_cache->result; }
+  in_port_t get_port() const { return m_port; }
+  bool success() const { return m_hostname_cache->error == 0; }
+  char const* get_error() const { return dns_strerror(m_hostname_cache->error); }
 };
 
 } // namespace resolver

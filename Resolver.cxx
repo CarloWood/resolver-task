@@ -22,7 +22,7 @@
  */
 
 #include "sys.h"
-#include "Resolver.h"
+#include "Lookup.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
@@ -149,7 +149,7 @@ void Resolver::init(bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128)
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_hostname_cache_memory_pool(128), m_lookup_memory_pool(32)
 {
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
@@ -177,10 +177,14 @@ void Resolver::run_dns()
 
   // This sets m_addrinfo to null again - allowing for the next lookup to start.
   if (error == ENOENT)
-    m_lookup->set_result(std::move(m_addrinfo));
+  {
+    m_current_lookup->result = std::move(m_addrinfo);
+    m_current_lookup->ready.store(true, std::memory_order_release);
+  }
   else if (error != EAGAIN)
   {
-    m_lookup->set_error(error);
+    m_current_lookup->error = error;
+    m_current_lookup->ready.store(true, std::memory_order_release);
     m_addrinfo.clear();
   }
 }
@@ -190,25 +194,14 @@ Resolver::SocketDevice::~SocketDevice()
   DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
 }
 
-bool Resolver::HostnameCacheEqualTo::operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const
-{
-  // Assuming we only compare Lookup objects whose hash is equal, it is
-  // already pretty likely that they are equal and we will have to compare
-  // everything; if they are not equal then it is more likely than normal
-  // that the service and/or hints are unequal; and because those are the
-  // fastest to compare we start with those.
-  return lookup1->get_hints() == lookup2->get_hints() &&
-         lookup1->get_hostname() == lookup2->get_hostname();
-}
-
 std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
 {
   DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << port << ", " << hints << ")");
 
-  utils::Allocator<Lookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
-  auto insert_result = m_cache.insert(std::allocate_shared<Lookup>(node_allocator, std::move(hostname), hints.hash_seed()));
+  utils::Allocator<HostnameCache, utils::NodeMemoryPool> hostname_cache_allocator(m_hostname_cache_memory_pool);
+  auto insert_result = m_hostname_cache.insert(std::allocate_shared<HostnameCache>(hostname_cache_allocator, std::move(hostname), hints.hash_seed()));
 
-  m_lookup = *insert_result.first;
+  m_current_lookup = *insert_result.first;
 
   // If this was a new Lookup, query the DNS server(s).
   if (insert_result.second)
@@ -218,7 +211,7 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_
     ASSERT(m_dns_resolver);
 
     int error = 0;        // Must be set to 0.
-    m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+    m_dns_addrinfo = dns_ai_open(m_current_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
 
     // FIXME: throw error.
     if (!m_dns_addrinfo)
@@ -232,7 +225,8 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_
   else
     Dout(dc::notice, "Found cached entry!");
 
-  return m_lookup;
+  utils::Allocator<Lookup, utils::NodeMemoryPool> lookup_allocator(m_lookup_memory_pool);
+  return std::allocate_shared<Lookup>(lookup_allocator, m_current_lookup, port);
 }
 
 // A simple map from protocol numbers to protocol strings.

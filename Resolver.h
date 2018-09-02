@@ -23,8 +23,8 @@
 
 #pragma once
 
-#include "Lookup.h"
 #include "Service.h"
+#include "AddressInfo.h"
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
@@ -35,6 +35,7 @@
 #include <array>
 #include <unordered_set>
 #include <type_traits>
+#include <atomic>
 
 struct dns_resolv_conf;
 struct dns_resolver;
@@ -43,6 +44,7 @@ struct dns_addrinfo;
 namespace resolver {
 
 class AddressInfoHints;
+class Lookup;
 
 // The Resolver must be initialized, at the start of main, after the IO event loop thread.
 // A typical way that main() could start is as follows:
@@ -94,17 +96,32 @@ class Resolver : public Singleton<Resolver>
     void read_from_fd(int fd) override;   // Read thread.
   };
 
+  friend class Lookup;
+  struct HostnameCache
+  {
+    std::string str;
+    uint32_t hints;
+    AddressInfoList result;
+    int error;
+    std::atomic_bool ready;
+
+    HostnameCache(std::string&& hostname, uint32_t hints) : str(std::move(hostname)), hints(hints), error(0), ready(false) { }
+  };
+
   struct HostnameCacheHash
   {
-    uint64_t operator()(std::shared_ptr<Lookup> const& lookup) const
+    uint64_t operator()(std::shared_ptr<HostnameCache> const& hostname_cache_entry) const
     {
-      return util::Hash64WithSeeds(lookup->get_hostname().data(), lookup->get_hostname().length(), 0x9ae16a3b2f90404fULL, lookup->get_hints());
+      return util::Hash64WithSeeds(hostname_cache_entry->str.data(), hostname_cache_entry->str.length(), 0x9ae16a3b2f90404fULL, hostname_cache_entry->hints);
     }
   };
 
   struct HostnameCacheEqualTo
   {
-    bool operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const;
+    bool operator()(std::shared_ptr<HostnameCache> const& hostname_cache_entry1, std::shared_ptr<HostnameCache> const& hostname_cache_entry2) const
+    {
+      return hostname_cache_entry1->hints == hostname_cache_entry2->hints && hostname_cache_entry1->str == hostname_cache_entry2->str;
+    }
   };
 
   struct ServiceCacheHash
@@ -130,10 +147,11 @@ class Resolver : public Singleton<Resolver>
   using servicekey_to_port_cache_type = google::dense_hash_map<Service, in_port_t, ServiceCacheHash, ServiceCacheEqualTo>;
   using servicekey_to_port_cache_ts = aithreadsafe::Wrapper<servicekey_to_port_cache_type, aithreadsafe::policy::Primitive<std::mutex>>;
   servicekey_to_port_cache_ts m_servicekey_to_port_cache;
-  utils::NodeMemoryPool m_node_memory_pool;
+  utils::NodeMemoryPool m_hostname_cache_memory_pool;
+  utils::NodeMemoryPool m_lookup_memory_pool;
   AddressInfoList m_addrinfo;
-  std::shared_ptr<Lookup> m_lookup;
-  std::unordered_set<std::shared_ptr<Lookup>, HostnameCacheHash, HostnameCacheEqualTo> m_cache;
+  std::shared_ptr<HostnameCache> m_current_lookup;
+  std::unordered_set<std::shared_ptr<HostnameCache>, HostnameCacheHash, HostnameCacheEqualTo> m_hostname_cache;
 
   std::shared_ptr<Lookup> queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
   void run_dns();
@@ -157,7 +175,7 @@ class Resolver : public Singleton<Resolver>
       std::shared_ptr<Lookup>>::type
   getaddrinfo(S1&& node, char const* service, AddressInfoHints const& hints = AddressInfoHints())
   {
-    return queue_request(std::forward<std::string>(node), port(Service(service)), hints);
+    return queue_request(std::forward<std::string>(node), port(Service(service, hints.as_addrinfo()->ai_protocol)), hints);
   }
 
   // Return the cannonical string that is used in /etc/protocols for this protocol.
