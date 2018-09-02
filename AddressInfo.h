@@ -22,7 +22,7 @@ class AddressInfoHints
                                                         //   AI_IDN, AI_CANONIDN, AI_IDN_ALLOW_UNASSIGNED or AI_IDN_USE_STD3_ASCII_RULES.
       int family = AF_UNSPEC,                           // AF_INET or AF_INET6. AF_UNSPEC means any address family.
       int socktype = 0,                                 // SOCK_STREAM or SOCK_DGRAM. 0 means any socket type.
-      int protocol = 0) :                               // PF_INET or PF_INET6 (just leave this at 0 as there is only one protocol per family anyway).
+      int protocol = 0) :                               // IPPROTO_TCP, IPPROTO_UDP, etc. 0 means any protocol.
     m_hints{ flags, family, socktype, protocol, 0, nullptr, nullptr, nullptr } { }
 
   struct addrinfo const* as_addrinfo() const { return &m_hints; }

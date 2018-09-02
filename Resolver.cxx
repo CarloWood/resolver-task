@@ -26,6 +26,8 @@
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
+#include <arpa/inet.h>
+#include <cstring>
 
 namespace resolver {
 
@@ -71,7 +73,6 @@ void Resolver::SocketDevice::dns_closed_fd(void* user_data)
 {
   DoutEntering(dc::notice, "dns_closed_fd()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  ASSERT(false); // When do we get here?
   RefCountReleaser releaser;
   // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
   releaser = self;
@@ -148,6 +149,12 @@ void Resolver::init(bool recurse)
   }
 }
 
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128)
+{
+  Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
+  servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
+}
+
 Resolver::~Resolver()
 {
   // It is OK to call this with a nullptr.
@@ -183,7 +190,7 @@ Resolver::SocketDevice::~SocketDevice()
   DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
 }
 
-bool Resolver::CacheEqualTo::operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const
+bool Resolver::HostnameCacheEqualTo::operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const
 {
   // Assuming we only compare Lookup objects whose hash is equal, it is
   // already pretty likely that they are equal and we will have to compare
@@ -191,16 +198,15 @@ bool Resolver::CacheEqualTo::operator()(std::shared_ptr<Lookup> const& lookup1, 
   // that the service and/or hints are unequal; and because those are the
   // fastest to compare we start with those.
   return lookup1->get_hints() == lookup2->get_hints() &&
-         lookup1->get_service().is_cache_equal_to(lookup2->get_service()) &&    // Do is_cache_equal_to first assuming the most likely: that they are both numeric.
          lookup1->get_hostname() == lookup2->get_hostname();
 }
 
-std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, Service const& service, AddressInfoHints const& hints)
+std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
 {
-  DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << service << ", " << hints << ")");
+  DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << port << ", " << hints << ")");
 
   utils::Allocator<Lookup, utils::NodeMemoryPool> node_allocator(m_node_memory_pool);
-  auto insert_result = m_cache.insert(std::allocate_shared<Lookup>(node_allocator, std::move(hostname), service, hints.hash_seed()));
+  auto insert_result = m_cache.insert(std::allocate_shared<Lookup>(node_allocator, std::move(hostname), hints.hash_seed()));
 
   m_lookup = *insert_result.first;
 
@@ -212,8 +218,7 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, Service 
     ASSERT(m_dns_resolver);
 
     int error = 0;        // Must be set to 0.
-    char const* service_name = m_lookup->get_service().is_numeric() ? "0" : m_lookup->get_service().get_name();
-    m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), service_name, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+    m_dns_addrinfo = dns_ai_open(m_lookup->get_hostname().c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
 
     // FIXME: throw error.
     if (!m_dns_addrinfo)
@@ -228,6 +233,165 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, Service 
     Dout(dc::notice, "Found cached entry!");
 
   return m_lookup;
+}
+
+// A simple map from protocol numbers to protocol strings.
+using protocol_names_type = aithreadsafe::Wrapper<std::array<char const*, IPPROTO_MAX>, aithreadsafe::policy::Primitive<std::mutex>>;
+static protocol_names_type protocol_names_s;
+
+// Return the official protocol name of `protocol'.
+// If protocol == 0, returns nullptr; otherwise if protocol doesn't exist, returns "unknown".
+char const* Resolver::protocol_str(in_proto_t protocol)
+{
+  char const* name = protocol_names_type::rat(protocol_names_s)->operator[](protocol);
+  if (AI_LIKELY(name || protocol == 0))
+    return name;
+
+  struct protoent result_buf;
+  char buf[1024];
+  size_t buflen = sizeof(buf);
+  char* bufptr = buf;
+  struct protoent* result;
+  int error;
+  for (;;)
+  {
+    error = getprotobynumber_r(protocol, &result_buf, bufptr, buflen, &result);
+    if (AI_LIKELY(error != ERANGE))
+      break;
+    if (bufptr == buf)
+      bufptr = nullptr;
+    buflen += 1024;
+    bufptr = (char*)std::realloc(bufptr, buflen);
+  }
+  // Is there any other error possible than ERANGE?
+  ASSERT(error == 0);
+  if (AI_LIKELY(result))
+  {
+    name = strdup(result->p_name);
+    ASSERT(result->p_proto == protocol);
+  }
+  else
+  {
+    Dout(dc::warning, "Unknown protocol number " << static_cast<int>(protocol) << "!");
+    name = "unknown";
+  }
+
+  {
+    protocol_names_type::rat protocol_names_w(protocol_names_s);
+    if (AI_UNLIKELY(protocol_names_w->operator[](protocol)))        // Make sure another thread didn't already initialize this entry in the meantime.
+    {
+      if (result)
+        std::free(const_cast<char*>(name));
+      name = protocol_names_w->operator[](protocol);
+    }
+    else
+      protocol_names_w->operator[](protocol) = name;
+  }
+
+  if (AI_UNLIKELY(buflen > sizeof(buf)))
+    std::free(bufptr);
+
+  return name;
+}
+
+// Return protocol number of `protocol_str'.
+// If protocol_str is nullptr then returns 0.
+in_proto_t Resolver::protocol(char const* protocol_str)
+{
+  // Let nullptr mean 'any protocol'.
+  if (protocol_str == nullptr)
+    return 0;
+
+  // Speed up for the strings "tcp" and "udp", where
+  // we assume that protocol_str is a valid protocol name.
+  // There are no protocol names of less than 2 characters, so protocol_str[2] always exists.
+  // Once the third character is a 'p' then the fourth character also always exists.
+  if (protocol_str[2] == 'p' && protocol_str[3] == '\0')
+  {
+    if (protocol_str[0] == 't' && protocol_str[1] == 'c')
+      return IPPROTO_TCP;
+    if (protocol_str[0] == 'u' && protocol_str[1] == 'd')
+      return IPPROTO_UDP;
+  }
+
+  struct protoent result_buf;
+  char buf[1024];
+  size_t buflen = sizeof(buf);
+  char* bufptr = buf;
+  struct protoent* result;
+  int error;
+  for (;;)
+  {
+    error = getprotobyname_r(protocol_str, &result_buf, bufptr, buflen, &result);
+    if (AI_LIKELY(error != ERANGE))
+      break;
+    if (bufptr == buf)
+      bufptr = nullptr;
+    buflen += 1024;
+    bufptr = (char*)std::realloc(bufptr, buflen);
+  }
+  // Is there any other error possible than ERANGE?
+  ASSERT(error == 0);
+  in_proto_t protocol;
+  if (AI_LIKELY(result))
+    protocol = result->p_proto;
+  else
+  {
+    Dout(dc::warning, "Unknown protocol string \"" << protocol_str << "\"!");
+    protocol = 0;
+  }
+  if (AI_UNLIKELY(buflen > sizeof(buf)))
+    std::free(bufptr);
+  return protocol;
+}
+
+in_port_t Resolver::port(Service const& key)
+{
+  in_port_t port;
+  bool found;
+  {
+    servicekey_to_port_cache_ts::rat servicekey_to_port_cache_r(m_servicekey_to_port_cache);
+    auto iter = servicekey_to_port_cache_r->find(key);
+    found = iter != servicekey_to_port_cache_r->end();
+    if (AI_LIKELY(found))
+      port = iter->second;
+  }
+  if (AI_UNLIKELY(!found))
+  {
+    struct servent result_buf;
+    char buf[1024];
+    size_t buflen = sizeof(buf);
+    char* bufptr = buf;
+    struct servent* result;
+    int error;
+    for (;;)
+    {
+      error = getservbyname_r(key.name(), protocol_str(key.protocol()), &result_buf, bufptr, buflen, &result);
+      if (AI_LIKELY(error != ERANGE))
+        break;
+      if (bufptr == buf)
+        bufptr = nullptr;
+      buflen += 1024;
+      bufptr = (char*)std::realloc(bufptr, buflen);
+    }
+    // Is there any other error possible than ERANGE?
+    ASSERT(error == 0);
+    if (AI_LIKELY(result))
+      port = ntohs(result->s_port);
+    else
+    {
+#ifdef CWDEBUG
+      char const* ps = protocol_str(key.protocol());
+      Dout(dc::warning, "Unknown service string \"" << key.name() << "\" for protocol \"" << (ps ? ps : "<any>") << "\"!");
+#endif
+      port = 0;
+    }
+    if (AI_UNLIKELY(buflen > sizeof(buf)))
+      std::free(bufptr);
+    servicekey_to_port_cache_ts::wat servicekey_to_port_cache_w(m_servicekey_to_port_cache);
+    servicekey_to_port_cache_w->operator[](key) = port;
+  }
+  return port;
 }
 
 } // namespace resolver

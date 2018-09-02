@@ -24,11 +24,13 @@
 #pragma once
 
 #include "Lookup.h"
+#include "Service.h"
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
 #include "farmhash/src/farmhash.h"
 #include <boost/intrusive_ptr.hpp>
+#include <sparsehash/dense_hash_map>
 #include <memory>
 #include <array>
 #include <unordered_set>
@@ -42,11 +44,33 @@ namespace resolver {
 
 class AddressInfoHints;
 
+// The Resolver must be initialized, at the start of main, after the IO event loop thread.
+// A typical way that main() could start is as follows:
+//
+// using resolver::Resolver;
+//
+// int main()
+// {
+//   Debug(NAMESPACE_DEBUG::init());
+//
+//   AIThreadPool thread_pool;
+//   AIQueueHandle handler = thread_pool.new_queue(queue_capacity);
+//   // Initialize the IO event loop thread.
+//   EventLoopThread::instance().init(handler);
+//   // Initialize the async hostname resolver.
+//   Resolver::instance().init(recurse);        // recurse is a boolean (true or false).
+//
+//...
+//
+//   // Terminate application.
+//   Resolver::instance().close();
+//   EventLoopThread::instance().terminate();
+// }
 class Resolver : public Singleton<Resolver>
 {
   friend_Instance;
  private:
-  Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_node_memory_pool(128) { }
+  Resolver();
   ~Resolver();
   Resolver(Resolver const&) = delete;
 
@@ -70,29 +94,48 @@ class Resolver : public Singleton<Resolver>
     void read_from_fd(int fd) override;   // Read thread.
   };
 
-  struct CacheHash
+  struct HostnameCacheHash
   {
     uint64_t operator()(std::shared_ptr<Lookup> const& lookup) const
     {
-      return util::Hash64WithSeeds(lookup->get_hostname().data(), lookup->get_hostname().length(), lookup->get_service().hash_seed(), lookup->get_hints());
+      return util::Hash64WithSeeds(lookup->get_hostname().data(), lookup->get_hostname().length(), 0x9ae16a3b2f90404fULL, lookup->get_hints());
     }
   };
 
-  struct CacheEqualTo
+  struct HostnameCacheEqualTo
   {
     bool operator()(std::shared_ptr<Lookup> const& lookup1, std::shared_ptr<Lookup> const& lookup2) const;
+  };
+
+  struct ServiceCacheHash
+  {
+    uint64_t operator()(Service const& key) const
+    {
+      return key.hash();
+    }
+  };
+
+  struct ServiceCacheEqualTo
+  {
+    bool operator()(Service const& key1, Service const& key2) const
+    {
+      return key1.protocol() == key2.protocol() && std::strcmp(key1.name(), key2.name()) == 0;
+    }
   };
 
   struct dns_resolv_conf* m_dns_resolv_conf;
   struct dns_resolver* m_dns_resolver;
   struct dns_addrinfo* m_dns_addrinfo;
   std::array<boost::intrusive_ptr<SocketDevice>, 2> m_socket_devices;
+  using servicekey_to_port_cache_type = google::dense_hash_map<Service, in_port_t, ServiceCacheHash, ServiceCacheEqualTo>;
+  using servicekey_to_port_cache_ts = aithreadsafe::Wrapper<servicekey_to_port_cache_type, aithreadsafe::policy::Primitive<std::mutex>>;
+  servicekey_to_port_cache_ts m_servicekey_to_port_cache;
   utils::NodeMemoryPool m_node_memory_pool;
   AddressInfoList m_addrinfo;
   std::shared_ptr<Lookup> m_lookup;
-  std::unordered_set<std::shared_ptr<Lookup>, CacheHash, CacheEqualTo> m_cache;
+  std::unordered_set<std::shared_ptr<Lookup>, HostnameCacheHash, HostnameCacheEqualTo> m_cache;
 
-  std::shared_ptr<Lookup> queue_request(std::string&& hostname, Service const& service, AddressInfoHints const& hints);
+  std::shared_ptr<Lookup> queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
   void run_dns();
 
  public:
@@ -103,10 +146,30 @@ class Resolver : public Singleton<Resolver>
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       std::shared_ptr<Lookup>>::type
-  getaddrinfo(S1&& node, Service const& service, AddressInfoHints const& hints = AddressInfoHints())
+  getaddrinfo(S1&& node, in_port_t port, AddressInfoHints const& hints = AddressInfoHints())
   {
-    return queue_request(std::forward<std::string>(node), service, hints);
+    return queue_request(std::forward<std::string>(node), port, hints);
   }
+
+  template<typename S1>
+  typename std::enable_if<
+      std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
+      std::shared_ptr<Lookup>>::type
+  getaddrinfo(S1&& node, char const* service, AddressInfoHints const& hints = AddressInfoHints())
+  {
+    return queue_request(std::forward<std::string>(node), port(Service(service)), hints);
+  }
+
+  // Return the cannonical string that is used in /etc/protocols for this protocol.
+  // This function is cached and thread-safe.
+  char const* protocol_str(in_proto_t protocol);
+
+  // Convert a protocol string to a protocol number.
+  in_proto_t protocol(char const* protocol_str);
+
+  // Return the port number corresponding to the service name / protocol combination `key'.
+  // This function is cached and thread-safe.
+  in_port_t port(Service const& key);
 
   void close()
   {
