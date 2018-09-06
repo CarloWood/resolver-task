@@ -39,6 +39,11 @@ Resolver::SocketDevice::SocketDevice() :
   DoutEntering(dc::notice, "Resolver::SocketDevice::SocketDevice()");
 }
 
+Resolver::SocketDevice::~SocketDevice()
+{
+  DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
+}
+
 //static
 void* Resolver::SocketDevice::dns_created_socket(int fd)
 {
@@ -53,19 +58,35 @@ void* Resolver::SocketDevice::dns_created_socket(int fd)
 }
 
 //static
-void Resolver::SocketDevice::dns_wants_to_write(void* user_data)
+void Resolver::SocketDevice::dns_start_output_device(void* user_data)
 {
-  DoutEntering(dc::notice, "dns_wants_to_write()");
+  DoutEntering(dc::notice, "dns_start_output_device()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
   self->start_output_device();
 }
 
 //static
-void Resolver::SocketDevice::dns_wants_to_read(void* user_data)
+void Resolver::SocketDevice::dns_start_input_device(void* user_data)
 {
-  DoutEntering(dc::notice, "dns_wants_to_read()");
+  DoutEntering(dc::notice, "dns_start_input_device()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
   self->start_input_device();
+}
+
+//static
+void Resolver::SocketDevice::dns_stop_output_device(void* user_data)
+{
+  DoutEntering(dc::notice, "dns_stop_output_device()");
+  SocketDevice* self = static_cast<SocketDevice*>(user_data);
+  self->stop_output_device();
+}
+
+//static
+void Resolver::SocketDevice::dns_stop_input_device(void* user_data)
+{
+  DoutEntering(dc::notice, "dns_stop_input_device()");
+  SocketDevice* self = static_cast<SocketDevice*>(user_data);
+  self->stop_input_device();
 }
 
 //static
@@ -84,17 +105,17 @@ void Resolver::SocketDevice::dns_closed_fd(void* user_data)
 void Resolver::SocketDevice::write_to_fd(int fd)
 {
   DoutEntering(dc::evio, "Resolver::SocketDevice::write_to_fd(" << fd << ")");
-  stop_output_device();
-  dns_so_is_writable(Resolver::instance().m_dns_resolver, this);
-  Resolver::instance().run_dns();
+  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
+  dns_so_is_writable(dns_resolver_w->get(), this);
+  dns_resolver_w->run_dns();
 }
 
 void Resolver::SocketDevice::read_from_fd(int fd)
 {
   DoutEntering(dc::evio, "Resolver::SocketDevice::read_from_fd(" << fd << ")");
-  stop_input_device();
-  dns_so_is_readable(Resolver::instance().m_dns_resolver, this);
-  Resolver::instance().run_dns();
+  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
+  dns_so_is_readable(dns_resolver_w->get(), this);
+  dns_resolver_w->run_dns();
 }
 
 void Resolver::init(bool recurse)
@@ -105,6 +126,8 @@ void Resolver::init(bool recurse)
   char const* error_function = nullptr;
   struct dns_hosts* hosts = nullptr;
   struct dns_hints* hints = nullptr;
+
+  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
 
   do    // So we can use break (error).
   {
@@ -131,11 +154,20 @@ void Resolver::init(bool recurse)
         { error_function = "dns_hints_local"; break; }
     }
 
-    if (!(m_dns_resolver = dns_res_open(m_dns_resolv_conf, hosts, hints, nullptr, &opts, &error)))
+    struct dns_resolver* resolver = dns_res_open(m_dns_resolv_conf, hosts, hints, nullptr, &opts, &error);
+    if (!resolver)
       { error_function = "dns_res_open"; break; }
 
     // Set callback functions; this calls dns_created_socket for the already created UDP socket before it returns.
-    dns_set_so_hooks(m_dns_resolver, &SocketDevice::dns_created_socket, &SocketDevice::dns_wants_to_write, &SocketDevice::dns_wants_to_read, &SocketDevice::dns_closed_fd);
+    dns_set_so_hooks(resolver,
+        &SocketDevice::dns_created_socket,
+        &SocketDevice::dns_start_output_device,
+        &SocketDevice::dns_start_input_device,
+        &SocketDevice::dns_stop_output_device,
+        &SocketDevice::dns_stop_input_device,
+        &SocketDevice::dns_closed_fd);
+    // Store the resolver pointer with mutex protection.
+    dns_resolver_w->set(resolver);
   }
   while (0);
   if (error_function)
@@ -149,7 +181,7 @@ void Resolver::init(bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_hostname_cache_memory_pool(128), m_lookup_memory_pool(32)
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_hostname_cache_memory_pool(128), m_lookup_memory_pool(32)
 {
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
@@ -158,10 +190,10 @@ Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_dns_resolver(nullptr), m_ho
 Resolver::~Resolver()
 {
   // It is OK to call this with a nullptr.
-  dns_res_close(m_dns_resolver);
+  dns_res_close(dns_resolver_ts::wat(m_dns_resolver)->get());
 }
 
-void Resolver::run_dns()
+void Resolver::DnsResolver::run_dns()
 {
   int error;
   for (;;)
@@ -172,26 +204,47 @@ void Resolver::run_dns()
     if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
       break;
 
-    m_addrinfo.add(addrinfo);
+    m_current_lookup->result.add(addrinfo);
   }
 
-  // This sets m_addrinfo to null again - allowing for the next lookup to start.
-  if (error == ENOENT)
-  {
-    m_current_lookup->result = std::move(m_addrinfo);
-    m_current_lookup->ready.store(true, std::memory_order_release);
-  }
-  else if (error != EAGAIN)
-  {
+  if (error == EAGAIN)
+    return;
+
+  if (error != ENOENT)
     m_current_lookup->error = error;
-    m_current_lookup->ready.store(true, std::memory_order_release);
-    m_addrinfo.clear();
+
+  m_current_lookup->ready.store(true, std::memory_order_release);
+
+  if (!m_request_queue.empty())
+  {
+    auto& next_request = m_request_queue.front();
+    start_lookup(next_request.first, next_request.second);
+    m_request_queue.pop();
   }
 }
 
-Resolver::SocketDevice::~SocketDevice()
+void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints)
 {
-  DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
+  m_current_lookup = new_cache_entry;
+  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
+  ASSERT(m_dns_resolver);
+  int error = 0;        // Must be set to 0.
+  struct dns_addrinfo* addrinfo = dns_ai_open(m_current_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+  if (!addrinfo)    // FIXME: throw error.
+    DoutFatal(dc::fatal, dns_strerror(error) << '.');
+  // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
+  ASSERT(m_current_lookup->result.empty());
+  m_dns_addrinfo = addrinfo;
+  run_dns();
+}
+
+void Resolver::DnsResolver::queue_request(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints)
+{
+  // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
+  if (m_dns_addrinfo)
+    m_request_queue.emplace(new_cache_entry, hints);
+  else
+    start_lookup(new_cache_entry, hints);
 }
 
 std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
@@ -200,33 +253,15 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_
 
   utils::Allocator<HostnameCache, utils::NodeMemoryPool> hostname_cache_allocator(m_hostname_cache_memory_pool);
   auto insert_result = m_hostname_cache.insert(std::allocate_shared<HostnameCache>(hostname_cache_allocator, std::move(hostname), hints.hash_seed()));
-
-  m_current_lookup = *insert_result.first;
+  std::shared_ptr<HostnameCache> const& new_cache_entry = *insert_result.first;
+  Dout(dc::notice, (insert_result.second ? "Insert into hostname cache took place." : "Found cached entry!"));
 
   // If this was a new Lookup, query the DNS server(s).
   if (insert_result.second)
-  {
-    Dout(dc::notice, "Insert into cache took place.");
-    // Call Resolver.instance().init() at the start of main() to initialize the resolver.
-    ASSERT(m_dns_resolver);
-
-    int error = 0;        // Must be set to 0.
-    m_dns_addrinfo = dns_ai_open(m_current_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
-
-    // FIXME: throw error.
-    if (!m_dns_addrinfo)
-      DoutFatal(dc::fatal, dns_strerror(error) << '.');
-    // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
-    ASSERT(m_addrinfo.empty());
-
-    // Run libdns to actually get things started.
-    run_dns();
-  }
-  else
-    Dout(dc::notice, "Found cached entry!");
+    dns_resolver_ts::wat(m_dns_resolver)->queue_request(new_cache_entry, hints);
 
   utils::Allocator<Lookup, utils::NodeMemoryPool> lookup_allocator(m_lookup_memory_pool);
-  return std::allocate_shared<Lookup>(lookup_allocator, m_current_lookup, port);
+  return std::allocate_shared<Lookup>(lookup_allocator, new_cache_entry, port);
 }
 
 // A simple map from protocol numbers to protocol strings.
