@@ -29,6 +29,7 @@
 #include "utils/NodeMemoryPool.h"
 #include "evio/Device.h"
 #include "farmhash/src/farmhash.h"
+#include "statefultask/Timer.h"
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
 #include <memory>
@@ -112,7 +113,7 @@ class Resolver : public Singleton<Resolver>
     void read_from_fd(int fd) override;   // Read thread.
   };
 
-  struct HostnameCache;
+  struct HostnameCacheEntry;
 
   // This is a trick; instead of wrapping the actual struct we wrap
   // the pointer to it. Of course this means we need to keep this
@@ -121,35 +122,26 @@ class Resolver : public Singleton<Resolver>
   {
     struct dns_resolver* m_dns_resolver;
     struct dns_addrinfo* m_dns_addrinfo;        // Has to be protected too because it contains a pointer to dns_resolver.
-    std::queue<std::pair<std::shared_ptr<HostnameCache>, AddressInfoHints>> m_request_queue;
-    std::shared_ptr<HostnameCache> m_current_lookup;
+    std::queue<std::pair<std::shared_ptr<HostnameCacheEntry>, AddressInfoHints>> m_request_queue;
+    std::shared_ptr<HostnameCacheEntry> m_current_lookup;
    public:
     DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr) { }
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
-    void start_lookup(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints);
-    void queue_request(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints);
+    void start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
+    void queue_request(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
     void run_dns();     // Give CPU cycles to libdns.
   };
 
   struct dns_resolv_conf* m_dns_resolv_conf;
   using dns_resolver_ts = aithreadsafe::Wrapper<DnsResolver, aithreadsafe::policy::Primitive<std::mutex>>;
   dns_resolver_ts m_dns_resolver;
-  std::array<boost::intrusive_ptr<SocketDevice>, 2> m_socket_devices;   // The UDP and TCP sockets.
+
+  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<SocketDevice>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
+  socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
 
  public:
-  void close()
-  {
-    DoutEntering(dc::notice, "Resolver::close()");
-    for (unsigned int d = 0; d < m_socket_devices.size(); ++d)
-    {
-      if (m_socket_devices[d])
-      {
-        m_socket_devices[d]->close_input_device();
-        m_socket_devices[d].reset();
-      }
-    }
-  }
+  void close();
 
   //===========================================================================================================================================================
   //
@@ -180,10 +172,10 @@ class Resolver : public Singleton<Resolver>
  public:
   // Return the cannonical string that is used in /etc/protocols for this protocol.
   // This function is cached and thread-safe.
-  char const* protocol_str(in_proto_t protocol);
+  static char const* protocol_str(in_proto_t protocol);
 
-  // Convert a protocol string to a protocol number.
-  in_proto_t protocol(char const* protocol_str);
+  // Convert a protocol string to a protocol number (thread-safe).
+  static in_proto_t protocol(char const* protocol_str);
 
   // Return the port number corresponding to the service name / protocol combination `key'.
   // This function is cached and thread-safe.
@@ -195,9 +187,18 @@ class Resolver : public Singleton<Resolver>
   //
 
  private:
+  // The timer used to time out queries from the DNS server.
+  statefultask::Timer m_timer;
+
+  // Timer callback functions, called from libdns. If the timer times out between a call to dns_start_timer()
+  // and dns_stop_timer() then we should call dns_timed_out().
+  static void dns_start_timer();
+  static void dns_stop_timer();
+  static void timed_out();
+
   // This is a single entry in the m_hostname_cache.
   // These cache entries are accessed though class Lookup.
-  struct HostnameCache
+  struct HostnameCacheEntry
   {
     std::string str;            // Node name.
     uint32_t hints;             // (Unique) hash of the hints.
@@ -205,30 +206,39 @@ class Resolver : public Singleton<Resolver>
     int error;                  // If ready is true then this can be checked to see if there was an error.
     std::atomic_bool ready;     // Set when the query on str/hints finished.
 
-    HostnameCache(std::string&& hostname, uint32_t hints) : str(std::move(hostname)), hints(hints), error(0), ready(false) { }
+    HostnameCacheEntry(std::string&& hostname, uint32_t hints) : str(std::move(hostname)), hints(hints), error(0), ready(false) { }
   };
-  friend class Lookup;  // Needs access to HostnameCache.
+  friend class Lookup;  // Needs access to HostnameCacheEntry.
 
-  struct HostnameCacheHash
+  struct HostnameCacheEntryHash
   {
-    uint64_t operator()(std::shared_ptr<HostnameCache> const& hostname_cache_entry) const
+    uint64_t operator()(std::shared_ptr<HostnameCacheEntry> const& hostname_cache_entry) const
     {
       return util::Hash64WithSeeds(hostname_cache_entry->str.data(), hostname_cache_entry->str.length(), 0x9ae16a3b2f90404fULL, hostname_cache_entry->hints);
     }
   };
 
-  struct HostnameCacheEqualTo
+  struct HostnameCacheEntryEqualTo
   {
-    bool operator()(std::shared_ptr<HostnameCache> const& hostname_cache_entry1, std::shared_ptr<HostnameCache> const& hostname_cache_entry2) const
+    bool operator()(std::shared_ptr<HostnameCacheEntry> const& hostname_cache_entry1, std::shared_ptr<HostnameCacheEntry> const& hostname_cache_entry2) const
     {
       return hostname_cache_entry1->hints == hostname_cache_entry2->hints && hostname_cache_entry1->str == hostname_cache_entry2->str;
     }
   };
 
-  utils::NodeMemoryPool m_hostname_cache_memory_pool;                   // Memory pool of objects stored in m_hostname_cache.
-  std::unordered_set<std::shared_ptr<HostnameCache>, HostnameCacheHash, HostnameCacheEqualTo> m_hostname_cache;
+  struct HostnameCache
+  {
+    utils::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_hostname_cache.
+    std::unordered_set<std::shared_ptr<HostnameCacheEntry>, HostnameCacheEntryHash, HostnameCacheEntryEqualTo> unordered_set;
+    HostnameCache(int nchunks) : memory_pool(nchunks) { }
+  };
 
-  utils::NodeMemoryPool m_lookup_memory_pool;                           // Memory pool for objects returned by queue_request.
+  using hostname_cache_ts = aithreadsafe::Wrapper<HostnameCache, aithreadsafe::policy::Primitive<std::mutex>>;
+  hostname_cache_ts m_hostname_cache;
+
+  using lookup_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
+  lookup_memory_pool_ts m_lookup_memory_pool;                   // Memory pool for objects returned by queue_request.
+
   std::shared_ptr<Lookup> queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
 
  public:

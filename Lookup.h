@@ -33,17 +33,17 @@ namespace resolver {
 
 class Lookup
 {
-  using HostnameCache = Resolver::HostnameCache;
+  using HostnameCacheEntry = Resolver::HostnameCacheEntry;
 
  private:
-   std::shared_ptr<HostnameCache> m_hostname_cache;
+   std::shared_ptr<HostnameCacheEntry> m_hostname_cache;
    in_port_t m_port;
 
  public:
-  Lookup(std::shared_ptr<HostnameCache> const& hostname_cache, in_port_t port) :
+  Lookup(std::shared_ptr<HostnameCacheEntry> const& hostname_cache, in_port_t port) :
       m_hostname_cache(hostname_cache), m_port(port) { }
 
-  Lookup(std::shared_ptr<HostnameCache>&& hostname_cache, in_port_t port) :
+  Lookup(std::shared_ptr<HostnameCacheEntry>&& hostname_cache, in_port_t port) :
       m_hostname_cache(std::move(hostname_cache)), m_port(port) { }
 
   std::string const& get_hostname() const { return m_hostname_cache->str; }

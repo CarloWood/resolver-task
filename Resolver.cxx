@@ -52,9 +52,32 @@ void* Resolver::SocketDevice::dns_created_socket(int fd)
   resolver_device->init(fd);
   resolver_device->m_flags |= INTERNAL_FDS_DONT_CLOSE; // Let the closing be done by libdns.
   // Increment ref count to stop this SocketDevice from being deleted while being used by libdns.
-  intrusive_ptr_add_ref(resolver_device);
-  Dout(dc::io, "Incremented ref count (now " << resolver_device->ref_count() << ") [" << (void*)static_cast<IOBase*>(resolver_device) << ']');
-  return resolver_device;
+  socket_devices_ts::wat socket_devices_w(Resolver::instance().m_socket_devices);
+  for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
+  {
+    boost::intrusive_ptr<SocketDevice>& device_ptr(socket_devices_w->operator[](d));
+    if (!device_ptr)
+    {
+      device_ptr = resolver_device;
+      return resolver_device;
+    }
+  }
+  DoutFatal(dc::core, "Resolver::SocketDevice::dns_created_socket: creating more than 2 sockets?!");
+}
+
+void Resolver::close()
+{
+  DoutEntering(dc::notice, "Resolver::close()");
+  socket_devices_ts::wat socket_devices_w(m_socket_devices);
+  for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
+  {
+    boost::intrusive_ptr<SocketDevice>& device_ptr(socket_devices_w->operator[](d));
+    if (device_ptr)
+    {
+      device_ptr->close_input_device();
+      device_ptr.reset();
+    }
+  }
 }
 
 //static
@@ -165,6 +188,8 @@ void Resolver::init(bool recurse)
         &SocketDevice::dns_start_input_device,
         &SocketDevice::dns_stop_output_device,
         &SocketDevice::dns_stop_input_device,
+        &Resolver::dns_start_timer,
+        &Resolver::dns_stop_timer,
         &SocketDevice::dns_closed_fd);
     // Store the resolver pointer with mutex protection.
     dns_resolver_w->set(resolver);
@@ -181,7 +206,7 @@ void Resolver::init(bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_hostname_cache_memory_pool(128), m_lookup_memory_pool(32)
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_lookup_memory_pool(32)
 {
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
@@ -191,6 +216,29 @@ Resolver::~Resolver()
 {
   // It is OK to call this with a nullptr.
   dns_res_close(dns_resolver_ts::wat(m_dns_resolver)->get());
+}
+
+//static
+void Resolver::dns_start_timer()
+{
+  DoutEntering(dc::notice, "Resolver::dns_start_timer()");
+  instance().m_timer.start(statefultask::Interval<1, std::chrono::seconds>());
+}
+
+//static
+void Resolver::dns_stop_timer()
+{
+  DoutEntering(dc::notice, "Resolver::dns_stop_timer()");
+  instance().m_timer.stop();
+}
+
+//static
+void Resolver::timed_out()
+{
+  DoutEntering(dc::notice, "Resolver::timed_out()");
+  dns_resolver_ts::wat dns_resolver_w(instance().m_dns_resolver);
+  dns_timed_out(dns_resolver_w->get());
+  dns_resolver_w->run_dns();
 }
 
 void Resolver::DnsResolver::run_dns()
@@ -223,7 +271,7 @@ void Resolver::DnsResolver::run_dns()
   }
 }
 
-void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints)
+void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   m_current_lookup = new_cache_entry;
   // Call Resolver.instance().init() at the start of main() to initialize the resolver.
@@ -238,7 +286,7 @@ void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCache> const& n
   run_dns();
 }
 
-void Resolver::DnsResolver::queue_request(std::shared_ptr<HostnameCache> const& new_cache_entry, AddressInfoHints const& hints)
+void Resolver::DnsResolver::queue_request(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
   if (m_dns_addrinfo)
@@ -251,27 +299,33 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_
 {
   DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << port << ", " << hints << ")");
 
-  utils::Allocator<HostnameCache, utils::NodeMemoryPool> hostname_cache_allocator(m_hostname_cache_memory_pool);
-  auto insert_result = m_hostname_cache.insert(std::allocate_shared<HostnameCache>(hostname_cache_allocator, std::move(hostname), hints.hash_seed()));
-  std::shared_ptr<HostnameCache> const& new_cache_entry = *insert_result.first;
-  Dout(dc::notice, (insert_result.second ? "Insert into hostname cache took place." : "Found cached entry!"));
+  bool new_cache_entry;
+  std::shared_ptr<HostnameCacheEntry> const* new_cache_entry_ptr;
+  {
+    hostname_cache_ts::wat hostname_cache_w(m_hostname_cache);
+    utils::Allocator<HostnameCacheEntry, utils::NodeMemoryPool> hostname_cache_allocator(hostname_cache_w->memory_pool);
+    auto insert_result = hostname_cache_w->unordered_set.insert(std::allocate_shared<HostnameCacheEntry>(hostname_cache_allocator, std::move(hostname), hints.hash_seed()));
+    new_cache_entry_ptr = &*insert_result.first;
+    new_cache_entry = insert_result.second;
+  }
+  Dout(dc::notice, (new_cache_entry ? "Insert into hostname cache took place." : "Found cached entry!"));
 
   // If this was a new Lookup, query the DNS server(s).
-  if (insert_result.second)
-    dns_resolver_ts::wat(m_dns_resolver)->queue_request(new_cache_entry, hints);
+  if (new_cache_entry)
+    dns_resolver_ts::wat(m_dns_resolver)->queue_request(*new_cache_entry_ptr, hints);
 
-  utils::Allocator<Lookup, utils::NodeMemoryPool> lookup_allocator(m_lookup_memory_pool);
-  return std::allocate_shared<Lookup>(lookup_allocator, new_cache_entry, port);
+  return std::allocate_shared<Lookup>(utils::Allocator<Lookup, utils::NodeMemoryPool>(*lookup_memory_pool_ts::wat(m_lookup_memory_pool)), *new_cache_entry_ptr, port);
 }
-
-// A simple map from protocol numbers to protocol strings.
-using protocol_names_type = aithreadsafe::Wrapper<std::array<char const*, IPPROTO_MAX>, aithreadsafe::policy::Primitive<std::mutex>>;
-static protocol_names_type protocol_names_s;
 
 // Return the official protocol name of `protocol'.
 // If protocol == 0, returns nullptr; otherwise if protocol doesn't exist, returns "unknown".
+//static
 char const* Resolver::protocol_str(in_proto_t protocol)
 {
+  // A simple map from protocol numbers to protocol strings.
+  using protocol_names_type = aithreadsafe::Wrapper<std::array<char const*, IPPROTO_MAX>, aithreadsafe::policy::Primitive<std::mutex>>;
+  static protocol_names_type protocol_names_s;
+
   char const* name = protocol_names_type::rat(protocol_names_s)->operator[](protocol);
   if (AI_LIKELY(name || protocol == 0))
     return name;
@@ -325,6 +379,7 @@ char const* Resolver::protocol_str(in_proto_t protocol)
 
 // Return protocol number of `protocol_str'.
 // If protocol_str is nullptr then returns 0.
+//static
 in_proto_t Resolver::protocol(char const* protocol_str)
 {
   // Let nullptr mean 'any protocol'.
