@@ -38,9 +38,8 @@ char const* AILookupTask::state_str_impl(state_type run_state) const
   return "UNKNOWN STATE";
 }
 
-void AILookupTask::done()
+void AILookupTask::done(resolver::Resolver::HostnameCacheEntryReadyEvent const&)
 {
-  mLookupFinished.store(true, std::memory_order_relaxed);
   signal(1);
 }
 
@@ -50,35 +49,7 @@ void AILookupTask::multiplex_impl(state_type run_state)
   {
     case AILookupTask_start:
       {
-        struct addrinfo hints = { AI_V4MAPPED /*| AI_ADDRCONFIG*/, AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, nullptr, nullptr, nullptr };
-        struct addrinfo* res;
-        int err = getaddrinfo(mNodeName.c_str(), mServiceName.c_str(), &hints, &res);
-        if (err != 0)
-        {
-          Dout(dc::warning, "getaddrinfo() returned \"" << gai_strerror(err) << "\".");
-        }
-        else
-        {
-          mResult = res;
-        }
-        freeaddrinfo(res);
-        done();
-#if 0
-        if (err != 0)
-        {
-          if (err == EAI_AGAIN)
-          {
-          }
-          else if (err == EAI_ALLDONE)
-          {
-            finish();
-            break;
-          }
-          else if (err == EAI_INTR)
-            break;
-        }
-#endif
-        wait_until([&]{ return mLookupFinished.load(std::memory_order_relaxed); }, 1, AILookupTask_done);
+        wait_until([this]{ return m_result->is_ready(); }, 1, AILookupTask_done);
         break;
       }
     case AILookupTask_done:
@@ -87,9 +58,4 @@ void AILookupTask::multiplex_impl(state_type run_state)
         break;
       }
   }
-}
-
-void AILookupTask::abort_impl()
-{
-  // ...
 }

@@ -25,6 +25,8 @@
 
 #include "statefultask/AIStatefulTask.h"
 #include "AddressInfo.h"
+#include "Lookup.h"
+#include "debug.h"
 #include <atomic>
 
 /*!
@@ -69,57 +71,62 @@ class AILookupTask : public AIStatefulTask
   static state_type constexpr max_state = AILookupTask_done + 1;
 
  private:
-  std::atomic_bool mLookupFinished;     //!< Set to true after the hostname lookup finished.
-  std::string mNodeName;                //!< Input variable: the node name that needs to be resolved.
-  std::string mServiceName;             //!< Input variable: the service name that needs to be resolved.
-  resolver::AddressInfoList mResult;    //!< The result after successful lookup.
+  std::shared_ptr<resolver::Lookup> m_result;
+  events::RequestHandle<resolver::Resolver::HostnameCacheEntryReadyEvent> m_handle;
+  events::BusyInterface m_busy_interface;
 
  public:
   /*!
    * @brief Construct an AILookupTask object.
    */
-  AILookupTask(DEBUG_ONLY(bool debug = false)) :
-#ifdef CWDEBUG
-    AIStatefulTask(debug),
-#endif
-    mLookupFinished(false) { DoutEntering(dc::statefultask(mSMDebug), "AILookupTask() [" << (void*)this << "]"); }
+  AILookupTask( DEBUG_ONLY(bool debug = false) ) DEBUG_ONLY(: AIStatefulTask(debug))
+    { DoutEntering(dc::statefultask(mSMDebug), "AILookupTask() [" << (void*)this << "]"); }
 
   /*!
-   * @brief Set the node and service namethat needs to be resolved.
+   * @brief Start the lookup of hostname that needs to be resolved.
    *
-   * @param node_name The hostname to be resolved.
-   * @param service_name The port number or service name of the end point.
+   * @param node The hostname to be resolved.
+   * @param port The port number of the end point.
+   * @param hints Optional hints.
    */
-  void set_end_point(std::string node_name, std::string service_name)
+  template<typename S1>
+  typename std::enable_if<
+      std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
+      void>::type
+  getaddrinfo(S1&& node, in_port_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
-    mNodeName = node_name;
-    mServiceName = service_name;
+    m_result = resolver::Resolver::instance().queue_request(std::forward<std::string>(node), port, hints);
+    m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
   }
 
   /*!
-   * @brief Get the hostname.
+   * @brief Start the lookup of hostname and service name that need to be resolved.
    *
-   * @returns the node_name that was set by set_end_point.
+   * @param node The hostname that needs to be resolved.
+   * @param service The service name we want to connect or bind to.
+   * @param hints Optional hints.
    */
-  std::string const& get_node_name() const { return mNodeName; }
-
-  /*!
-   * @brief Get the servicename.
-   *
-   * @returns the service_name that was set by set_end_point.
-   */
-  std::string const& get_service_name() const { return mServiceName; }
+  template<typename S1>
+  typename std::enable_if<
+      std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
+      void>::type
+  getaddrinfo(S1&& node, char const* service, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
+  {
+    m_result = resolver::Resolver::instance().queue_request(std::forward<std::string>(node),
+        resolver::Resolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
+    m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
+  }
 
   /*!
    * @brief Get the result.
    *
    * @returns a AddressInfoList.
    */
-  resolver::AddressInfoList const& get_result() const { return mResult; }
+  resolver::AddressInfoList const& get_result() const { return m_result->get_result(); }
 
  protected:
   //! Call finish() (or abort()), not delete.
-  ~AILookupTask() override { DoutEntering(dc::statefultask(mSMDebug), "~AILookupTask() [" << (void*)this << "]"); }
+  ~AILookupTask() override { DoutEntering(dc::statefultask(mSMDebug), "~AILookupTask() [" << (void*)this << "]"); m_handle.cancel(); }
 
   //! Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
@@ -127,10 +134,7 @@ class AILookupTask : public AIStatefulTask
   //! Handle mRunState.
   void multiplex_impl(state_type run_state) override;
 
-  //! Handle aborting from current bs_run state.
-  void abort_impl() override;
-
  private:
-  // This is the callback for ....
-  void done();
+  // This is the callback for resolver::Resolver::HostnameCacheEntry::ready_event.
+  void done(resolver::Resolver::HostnameCacheEntryReadyEvent const&);
 };

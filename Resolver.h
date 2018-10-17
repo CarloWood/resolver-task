@@ -30,6 +30,7 @@
 #include "evio/Device.h"
 #include "farmhash/src/farmhash.h"
 #include "statefultask/Timer.h"
+#include "events/Events.h"
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
 #include <memory>
@@ -42,6 +43,7 @@
 struct dns_resolv_conf;
 struct dns_resolver;
 struct dns_addrinfo;
+class AILookupTask;
 
 namespace resolver {
 
@@ -126,6 +128,7 @@ class Resolver : public Singleton<Resolver>
     std::shared_ptr<HostnameCacheEntry> m_current_lookup;
    public:
     DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr) { }
+    ~DnsResolver() noexcept { } // Without this I get a silly compiler warning about failing to inline the destructor.
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
     void start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
@@ -196,6 +199,14 @@ class Resolver : public Singleton<Resolver>
   static void dns_stop_timer();
   static void timed_out();
 
+  struct HostnameCacheEntryReadyEvent
+  {
+    static constexpr bool one_shot = true;
+#ifdef CWDEBUG
+    friend std::ostream& operator<<(std::ostream& os, HostnameCacheEntryReadyEvent) { return os << "HostnameCacheEntryReadyEvent"; }
+#endif
+  };
+
   // This is a single entry in the m_hostname_cache.
   // These cache entries are accessed though class Lookup.
   struct HostnameCacheEntry
@@ -204,9 +215,17 @@ class Resolver : public Singleton<Resolver>
     uint32_t hints;             // (Unique) hash of the hints.
     AddressInfoList result;     // The result of the query, only valid when ready is true and error is zero.
     int error;                  // If ready is true then this can be checked to see if there was an error.
-    std::atomic_bool ready;     // Set when the query on str/hints finished.
 
     HostnameCacheEntry(std::string&& hostname, uint32_t hints) : str(std::move(hostname)), hints(hints), error(0), ready(false) { }
+
+    bool is_ready() const { return ready.load(std::memory_order_acquire); }
+    void set_ready() { ready.store(true, std::memory_order_release); m_ready_event.trigger(ready_event); }
+    auto& event_server() { return m_ready_event; }
+
+   private:
+    static constexpr HostnameCacheEntryReadyEvent ready_event = { };
+    std::atomic_bool ready;     // Set when the query on str/hints finished.
+    events::Server<HostnameCacheEntryReadyEvent> m_ready_event;   // Event server for "becoming ready", specific for this HostnameCacheEntry.
   };
   friend class Lookup;  // Needs access to HostnameCacheEntry.
 
@@ -239,6 +258,7 @@ class Resolver : public Singleton<Resolver>
   using lookup_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
   lookup_memory_pool_ts m_lookup_memory_pool;                   // Memory pool for objects returned by queue_request.
 
+  friend AILookupTask;
   std::shared_ptr<Lookup> queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
 
  public:

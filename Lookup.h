@@ -49,11 +49,12 @@ class Lookup
   std::string const& get_hostname() const { return m_hostname_cache->str; }
   uint32_t get_hints() const { return m_hostname_cache->hints; }
 
-  bool is_ready() const { return m_hostname_cache->ready.load(std::memory_order_acquire); }
+  bool is_ready() const { return m_hostname_cache->is_ready(); }
   AddressInfoList const& get_result() const { return m_hostname_cache->result; }
   in_port_t get_port() const { return m_port; }
   bool success() const { return m_hostname_cache->error == 0; }
   char const* get_error() const { return dns_strerror(m_hostname_cache->error); }
+  auto& event_server() const { return m_hostname_cache->event_server(); }
 };
 
 } // namespace resolver

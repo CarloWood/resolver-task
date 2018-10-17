@@ -125,7 +125,7 @@ void Resolver::SocketDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-void Resolver::SocketDevice::write_to_fd(int fd)
+void Resolver::SocketDevice::write_to_fd(int DEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "Resolver::SocketDevice::write_to_fd(" << fd << ")");
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
@@ -133,7 +133,7 @@ void Resolver::SocketDevice::write_to_fd(int fd)
   dns_resolver_w->run_dns();
 }
 
-void Resolver::SocketDevice::read_from_fd(int fd)
+void Resolver::SocketDevice::read_from_fd(int DEBUG_ONLY(fd))
 {
   DoutEntering(dc::evio, "Resolver::SocketDevice::read_from_fd(" << fd << ")");
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
@@ -261,7 +261,7 @@ void Resolver::DnsResolver::run_dns()
   if (error != ENOENT)
     m_current_lookup->error = error;
 
-  m_current_lookup->ready.store(true, std::memory_order_release);
+  m_current_lookup->set_ready();
 
   if (!m_request_queue.empty())
   {

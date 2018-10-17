@@ -17,7 +17,7 @@ SOURCES = \
 	Service.cxx
 
 libresolvertask_la_SOURCES = ${SOURCES}
-libresolvertask_la_CXXFLAGS = -std=c++11 @LIBCWD_R_FLAGS@
+libresolvertask_la_CXXFLAGS = @LIBCWD_R_FLAGS@
 libresolvertask_la_LIBADD = dns/src/libdns.la @LIBCWD_R_LIBS@
 
 # --------------- Maintainer's Section
