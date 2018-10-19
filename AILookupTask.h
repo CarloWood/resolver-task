@@ -32,7 +32,7 @@
 /*!
  * @brief The resolver task.
  *
- * Before calling @link group_run run()@endlink, call set_hostname() to pass needed parameters.
+ * Before calling @link group_run run()@endlink, call getaddrinfo() to pass needed parameters.
  *
  * When the task finishes it calls the callback, use parameter _1,
  * (success) to check whether or not the task actually finished or
@@ -47,7 +47,7 @@
  * @code
  * AILookupTask* resolver = new AILookupTask;
  *
- * resolver->set_hostname("www.google.com");
+ * resolver->getaddrinfo("www.google.com", 80);
  * resolver->run(...);          // Start hostname look up and pass callback; see AIStatefulTask.
  * @endcode
  *
@@ -63,6 +63,7 @@ class AILookupTask : public AIStatefulTask
   //! The different states of the stateful task.
   enum resolver_state_type {
     AILookupTask_start = direct_base_type::max_state,
+    AILookupTask_ready,
     AILookupTask_done
   };
 
@@ -118,11 +119,31 @@ class AILookupTask : public AIStatefulTask
   }
 
   /*!
+   * @brief Test if lookup was successful.
+   *
+   * Only call this after done() was called (aka, from the callback).
+   *
+   * @returns True if success (call get_result()) and false when failure (call get_error()).
+   */
+  bool success() const { return m_result->success(); }
+
+  /*!
    * @brief Get the result.
+   *
+   * Only call this if success() returns true.
    *
    * @returns a AddressInfoList.
    */
   resolver::AddressInfoList const& get_result() const { return m_result->get_result(); }
+
+  /*!
+   * @brief Get the error.
+   *
+   * Only call this if success() returns false.
+   *
+   * @returns The error string.
+   */
+   char const* get_error() const { return m_result->get_error(); }
 
  protected:
   //! Call finish() (or abort()), not delete.

@@ -261,7 +261,12 @@ void Resolver::DnsResolver::run_dns()
   if (error != ENOENT)
     m_current_lookup->error = error;
 
+  Dout(dc::notice, "Calling set_ready()");
   m_current_lookup->set_ready();
+
+  // At this point the DnsResolver is no longer busy, provided this
+  // is only checked while holding a lock on Resolver::m_dns_resolver.
+  m_dns_addrinfo = nullptr;
 
   if (!m_request_queue.empty())
   {

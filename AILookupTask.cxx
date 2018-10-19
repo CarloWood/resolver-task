@@ -32,6 +32,7 @@ char const* AILookupTask::state_str_impl(state_type run_state) const
   switch(run_state)
   {
     AI_CASE_RETURN(AILookupTask_start);
+    AI_CASE_RETURN(AILookupTask_ready);
     AI_CASE_RETURN(AILookupTask_done);
   }
   ASSERT(false);
@@ -48,14 +49,22 @@ void AILookupTask::multiplex_impl(state_type run_state)
   switch (run_state)
   {
     case AILookupTask_start:
+      wait_until([this]{ return m_result->is_ready(); }, 1, AILookupTask_ready);
+      break;
+    case AILookupTask_ready:
+      set_state(AILookupTask_done);
+      // done() is not called by an engine, hence signal(1) is called by an 'immediate' handler.
+      // Call yield() here to switch back to the default handler (which shouldn't be immediate),
+      // before doing the call back. This is especially necessary when the call back attempts
+      // to start a new DNS look up by calling run().
+      if (is_immediate())       // Lets check it anway.
       {
-        wait_until([this]{ return m_result->is_ready(); }, 1, AILookupTask_done);
+        yield();
         break;
       }
+      /* FALL-THROUGH */
     case AILookupTask_done:
-      {
-        finish();
-        break;
-      }
+      finish();
+      break;
   }
 }

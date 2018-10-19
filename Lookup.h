@@ -50,7 +50,7 @@ class Lookup
   uint32_t get_hints() const { return m_hostname_cache->hints; }
 
   bool is_ready() const { return m_hostname_cache->is_ready(); }
-  AddressInfoList const& get_result() const { return m_hostname_cache->result; }
+  AddressInfoList const& get_result() const { ASSERT(!m_hostname_cache->error); return m_hostname_cache->result; }
   in_port_t get_port() const { return m_port; }
   bool success() const { return m_hostname_cache->error == 0; }
   char const* get_error() const { return dns_strerror(m_hostname_cache->error); }
