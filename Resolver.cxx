@@ -26,6 +26,7 @@
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
+#include "utils/AIAlert.h"
 #include <arpa/inet.h>
 #include <cstring>
 
@@ -201,8 +202,7 @@ void Resolver::init(bool recurse)
     dns_hints_close(hints);
     dns_hosts_close(hosts);
     dns_resconf_close(m_dns_resolv_conf);
-    // FIXME, throw exception instead.
-    DoutFatal(dc::fatal, error_function << "(): " << dns_strerror(error));
+    THROW_MALERT("[ERROR_FUNCTION]() returned \"[ERROR_MSG]\".", AIArgs("[ERROR_FUNCTION]", error_function)("[ERROR_MSG]", dns_strerror(error)));
   }
 }
 
@@ -283,8 +283,13 @@ void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCacheEntry> con
   ASSERT(m_dns_resolver);
   int error = 0;        // Must be set to 0.
   struct dns_addrinfo* addrinfo = dns_ai_open(m_current_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
-  if (!addrinfo)    // FIXME: throw error.
-    DoutFatal(dc::fatal, dns_strerror(error) << '.');
+  if (!addrinfo)
+  {
+    std::ostringstream hints_ss;
+    hints_ss << hints;
+    THROW_MALERT("dns_ai_open(\"[HOSTNAME]\") [with hints '[HINTS]'] returned \"[ERROR_MSG]\".",
+        AIArgs("[HOSTNAME]", m_current_lookup->str.c_str())("[HINTS]", hints_ss.str())("[ERROR_MSG]", dns_strerror(error)));
+  }
   // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
   ASSERT(m_current_lookup->result.empty());
   m_dns_addrinfo = addrinfo;

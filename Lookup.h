@@ -49,12 +49,34 @@ class Lookup
   std::string const& get_hostname() const { return m_hostname_cache->str; }
   uint32_t get_hints() const { return m_hostname_cache->hints; }
 
-  bool is_ready() const { return m_hostname_cache->is_ready(); }
-  AddressInfoList const& get_result() const { ASSERT(!m_hostname_cache->error); return m_hostname_cache->result; }
+  // Accessor.
   in_port_t get_port() const { return m_port; }
-  bool success() const { return m_hostname_cache->error == 0; }
-  char const* get_error() const { return dns_strerror(m_hostname_cache->error); }
+
+  // Return the events::Server that will get triggered after is_ready is set.
   auto& event_server() const { return m_hostname_cache->event_server(); }
+
+  // You shouldn't really use this as it is polling. Use event_server().request() instead to get notified.
+  bool is_ready() const { return m_hostname_cache->is_ready(); }
+
+  bool success() const
+  {
+    // Don't call success() when is_ready() doesn't return true (you should request a callback from the event_server()).
+    // If you're using AILookupTask: only call success() from the callback or parent (after successful finish of the child).
+    ASSERT(m_hostname_cache->is_ready());
+    return m_hostname_cache->error == 0;
+  }
+  AddressInfoList const& get_result() const
+  {
+    // Don't call get_result() when success() doesn't return true.
+    ASSERT(!m_hostname_cache->error);
+    return m_hostname_cache->result;
+  }
+  char const* get_error() const
+  {
+    // Don't call get_result() when success() doesn't return false.
+    ASSERT(m_hostname_cache->error);
+    return dns_strerror(m_hostname_cache->error);
+  }
 };
 
 } // namespace resolver

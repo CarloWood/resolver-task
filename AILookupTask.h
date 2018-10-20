@@ -52,7 +52,14 @@
  * @endcode
  *
  * The default behavior is to call the callback and then delete the AILookupTask object.
- * You can call run(...) with parameters from the callback function to do another look up.
+ * It is allowed to call getaddrinfo() followed by run() from the callback function to start another look up.
+ *
+ * In the callback / parent task,
+ *
+ * if (resolver->success())
+ *   // Use resolver->get_result()
+ * else
+ *   // Use resolver->get_error()
  */
 class AILookupTask : public AIStatefulTask
 {
