@@ -47,19 +47,22 @@
  * @code
  * AILookupTask* resolver = new AILookupTask;
  *
- * resolver->getaddrinfo("www.google.com", 80);
+ * resolver->getaddrinfo("www.google.com", 80);  // As usual, this initializes the task before running it; don't call getaddrinfo() multiple times.
  * resolver->run(...);          // Start hostname look up and pass callback; see AIStatefulTask.
  * @endcode
  *
  * The default behavior is to call the callback and then delete the AILookupTask object.
- * It is allowed to call getaddrinfo() followed by run() from the callback function to start another look up.
+ * It is allowed to call getaddrinfo() followed by run() from within the callback function
+ * to start another look up though.
  *
- * In the callback / parent task,
+ * In the callback / parent task use,
  *
+ * @code
  * if (resolver->success())
  *   // Use resolver->get_result()
  * else
  *   // Use resolver->get_error()
+ * @endcode
  */
 class AILookupTask : public AIStatefulTask
 {
