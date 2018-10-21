@@ -268,11 +268,11 @@ void Resolver::DnsResolver::run_dns()
   // is only checked while holding a lock on Resolver::m_dns_resolver.
   m_dns_addrinfo = nullptr;
 
-  if (!m_request_queue.empty())
+  if (!m_getaddrinfo_queue.empty())
   {
-    auto& next_request = m_request_queue.front();
+    auto& next_request = m_getaddrinfo_queue.front();
     start_lookup(next_request.first, next_request.second);
-    m_request_queue.pop();
+    m_getaddrinfo_queue.pop();
   }
 }
 
@@ -296,18 +296,18 @@ void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCacheEntry> con
   run_dns();
 }
 
-void Resolver::DnsResolver::queue_request(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
   if (m_dns_addrinfo)
-    m_request_queue.emplace(new_cache_entry, hints);
+    m_getaddrinfo_queue.emplace(new_cache_entry, hints);
   else
     start_lookup(new_cache_entry, hints);
 }
 
-std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
+std::shared_ptr<Lookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
 {
-  DoutEntering(dc::notice, "Resolver::queue_request(\"" << hostname << "\", " << port << ", " << hints << ")");
+  DoutEntering(dc::notice, "Resolver::queue_getaddrinfo(\"" << hostname << "\", " << port << ", " << hints << ")");
 
   bool new_cache_entry;
   std::shared_ptr<HostnameCacheEntry> const* new_cache_entry_ptr;
@@ -322,7 +322,7 @@ std::shared_ptr<Lookup> Resolver::queue_request(std::string&& hostname, in_port_
 
   // If this was a new Lookup, query the DNS server(s).
   if (new_cache_entry)
-    dns_resolver_ts::wat(m_dns_resolver)->queue_request(*new_cache_entry_ptr, hints);
+    dns_resolver_ts::wat(m_dns_resolver)->queue_getaddrinfo(*new_cache_entry_ptr, hints);
 
   return std::allocate_shared<Lookup>(utils::Allocator<Lookup, utils::NodeMemoryPool>(*lookup_memory_pool_ts::wat(m_lookup_memory_pool)), *new_cache_entry_ptr, port);
 }

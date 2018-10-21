@@ -106,7 +106,7 @@ class AILookupTask : public AIStatefulTask
       void>::type
   getaddrinfo(S1&& node, in_port_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
-    m_result = resolver::Resolver::instance().queue_request(std::forward<std::string>(node), port, hints);
+    m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node), port, hints);
     m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
   }
 
@@ -123,7 +123,7 @@ class AILookupTask : public AIStatefulTask
       void>::type
   getaddrinfo(S1&& node, char const* service, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
-    m_result = resolver::Resolver::instance().queue_request(std::forward<std::string>(node),
+    m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node),
         resolver::Resolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
     m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
   }

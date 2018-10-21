@@ -124,7 +124,7 @@ class Resolver : public Singleton<Resolver>
   {
     struct dns_resolver* m_dns_resolver;
     struct dns_addrinfo* m_dns_addrinfo;        // Has to be protected too because it contains a pointer to dns_resolver.
-    std::queue<std::pair<std::shared_ptr<HostnameCacheEntry>, AddressInfoHints>> m_request_queue;
+    std::queue<std::pair<std::shared_ptr<HostnameCacheEntry>, AddressInfoHints>> m_getaddrinfo_queue;
     std::shared_ptr<HostnameCacheEntry> m_current_lookup;
    public:
     DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr) { }
@@ -132,7 +132,7 @@ class Resolver : public Singleton<Resolver>
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
     void start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
-    void queue_request(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
+    void queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
     void run_dns();     // Give CPU cycles to libdns.
   };
 
@@ -257,10 +257,10 @@ class Resolver : public Singleton<Resolver>
   hostname_cache_ts m_hostname_cache;
 
   using lookup_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
-  lookup_memory_pool_ts m_lookup_memory_pool;                   // Memory pool for objects returned by queue_request.
+  lookup_memory_pool_ts m_lookup_memory_pool;                   // Memory pool for objects returned by queue_getaddrinfo.
 
   friend AILookupTask;
-  std::shared_ptr<Lookup> queue_request(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
+  std::shared_ptr<Lookup> queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
 
  public:
   // Hostname should be std::string or char const*; the template is only to allow perfect forwarding.
@@ -270,7 +270,7 @@ class Resolver : public Singleton<Resolver>
       std::shared_ptr<Lookup>>::type
   getaddrinfo(S1&& node, in_port_t port, AddressInfoHints const& hints = AddressInfoHints())
   {
-    return queue_request(std::forward<std::string>(node), port, hints);
+    return queue_getaddrinfo(std::forward<std::string>(node), port, hints);
   }
 
   template<typename S1>
@@ -279,7 +279,7 @@ class Resolver : public Singleton<Resolver>
       std::shared_ptr<Lookup>>::type
   getaddrinfo(S1&& node, char const* service, AddressInfoHints const& hints = AddressInfoHints())
   {
-    return queue_request(std::forward<std::string>(node), port(Service(service, hints.as_addrinfo()->ai_protocol)), hints);
+    return queue_getaddrinfo(std::forward<std::string>(node), port(Service(service, hints.as_addrinfo()->ai_protocol)), hints);
   }
 };
 
