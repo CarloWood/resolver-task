@@ -124,14 +124,15 @@ class Resolver : public Singleton<Resolver>
   {
     struct dns_resolver* m_dns_resolver;
     struct dns_addrinfo* m_dns_addrinfo;        // Has to be protected too because it contains a pointer to dns_resolver.
+    bool m_running;
     std::queue<std::pair<std::shared_ptr<HostnameCacheEntry>, AddressInfoHints>> m_getaddrinfo_queue;
     std::shared_ptr<HostnameCacheEntry> m_current_lookup;
    public:
-    DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr) { }
+    DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr), m_running(false) { }
     ~DnsResolver() noexcept { } // Without this I get a silly compiler warning about failing to inline the destructor.
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
-    void start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
+    void start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
     void queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
     void run_dns();     // Give CPU cycles to libdns.
   };

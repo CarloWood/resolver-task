@@ -244,39 +244,54 @@ void Resolver::timed_out()
 void Resolver::DnsResolver::run_dns()
 {
   int error;
-  for (;;)
+
+  if (!m_running)
   {
-    struct addrinfo* addrinfo;
-
-    // Give CPU to libdns until it returns a non-zero value.
-    if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
-      break;
-
-    m_current_lookup->result.add(addrinfo);
+    // This is a serious error; but I'm not really sure how or if it could happen even if the code is bug free.
+    Dout(dc::warning, "Calling Resolver::DnsResolver::run_dns() while not running?!");
+    return;
   }
 
-  if (error == EAGAIN)
-    return;
-
-  if (error != ENOENT)
-    m_current_lookup->error = error;
-
-  Dout(dc::notice, "Calling set_ready()");
-  m_current_lookup->set_ready();
-
-  // At this point the DnsResolver is no longer busy, provided this
-  // is only checked while holding a lock on Resolver::m_dns_resolver.
-  m_dns_addrinfo = nullptr;
-
-  if (!m_getaddrinfo_queue.empty())
+  if (m_dns_addrinfo)   // Are we doing a getaddrinfo lookup?
   {
-    auto& next_request = m_getaddrinfo_queue.front();
-    start_lookup(next_request.first, next_request.second);
-    m_getaddrinfo_queue.pop();
+    for (;;)
+    {
+      struct addrinfo* addrinfo;
+
+      // Give CPU to libdns until it returns a non-zero value.
+      if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
+        break;
+
+      m_current_lookup->result.add(addrinfo);
+    }
+
+    if (error == EAGAIN)
+      return;
+
+    if (error != ENOENT)
+      m_current_lookup->error = error;
+
+    Dout(dc::notice, "Calling set_ready()");
+    m_current_lookup->set_ready();
+
+    // At this point the DnsResolver is no longer busy, provided this
+    // is only checked while holding a lock on Resolver::m_dns_resolver.
+    m_running = false;
+    m_dns_addrinfo = nullptr;
+
+    if (!m_getaddrinfo_queue.empty())
+    {
+      auto& next_request = m_getaddrinfo_queue.front();
+      start_getaddrinfo(next_request.first, next_request.second);
+      m_getaddrinfo_queue.pop();
+    }
+  }
+  else                  // We're doing a getnameinfo lookup.
+  {
   }
 }
 
-void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   m_current_lookup = new_cache_entry;
   // Call Resolver.instance().init() at the start of main() to initialize the resolver.
@@ -293,16 +308,17 @@ void Resolver::DnsResolver::start_lookup(std::shared_ptr<HostnameCacheEntry> con
   // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
   ASSERT(m_current_lookup->result.empty());
   m_dns_addrinfo = addrinfo;
+  m_running = true;
   run_dns();
 }
 
 void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
-  if (m_dns_addrinfo)
+  if (m_running)
     m_getaddrinfo_queue.emplace(new_cache_entry, hints);
   else
-    start_lookup(new_cache_entry, hints);
+    start_getaddrinfo(new_cache_entry, hints);
 }
 
 std::shared_ptr<Lookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
