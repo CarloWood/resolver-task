@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Resolve a hostname. Declaration of class AILookupTask.
+ * @brief Resolve a hostname. Declaration of class GetAddrInfo.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -25,7 +25,7 @@
 
 #include "statefultask/AIStatefulTask.h"
 #include "AddressInfo.h"
-#include "Lookup.h"
+#include "AddrInfoLookup.h"
 #include "debug.h"
 #include <atomic>
 
@@ -45,13 +45,13 @@
  * Typical usage:
  *
  * @code
- * AILookupTask* resolver = new AILookupTask;
+ * GetAddrInfo* resolver = new GetAddrInfo;
  *
  * resolver->getaddrinfo("www.google.com", 80);  // As usual, this initializes the task before running it; don't call getaddrinfo() multiple times.
- * resolver->run(...);          // Start hostname look up and pass callback; see AIStatefulTask.
+ * resolver->run(...);          // Start hostname lookup and pass callback; see AIStatefulTask.
  * @endcode
  *
- * The default behavior is to call the callback and then delete the AILookupTask object.
+ * The default behavior is to call the callback and then delete the GetAddrInfo object.
  * It is allowed to call getaddrinfo() followed by run() from within the callback function
  * to start another look up though.
  *
@@ -64,7 +64,10 @@
  *   // Use resolver->get_error()
  * @endcode
  */
-class AILookupTask : public AIStatefulTask
+
+namespace task {
+
+class GetAddrInfo : public AIStatefulTask
 {
  protected:
   //! The base class of this task.
@@ -72,26 +75,26 @@ class AILookupTask : public AIStatefulTask
 
   //! The different states of the stateful task.
   enum resolver_state_type {
-    AILookupTask_start = direct_base_type::max_state,
-    AILookupTask_ready,
-    AILookupTask_done
+    GetAddrInfo_start = direct_base_type::max_state,
+    GetAddrInfo_ready,
+    GetAddrInfo_done
   };
 
  public:
   //! One beyond the largest state of this task.
-  static state_type constexpr max_state = AILookupTask_done + 1;
+  static state_type constexpr max_state = GetAddrInfo_done + 1;
 
  private:
-  std::shared_ptr<resolver::Lookup> m_result;
+  std::shared_ptr<resolver::AddrInfoLookup> m_result;
   events::RequestHandle<resolver::Resolver::HostnameCacheEntryReadyEvent> m_handle;
   events::BusyInterface m_busy_interface;
 
  public:
   /*!
-   * @brief Construct an AILookupTask object.
+   * @brief Construct an GetAddrInfo object.
    */
-  AILookupTask( DEBUG_ONLY(bool debug = false) ) DEBUG_ONLY(: AIStatefulTask(debug))
-    { DoutEntering(dc::statefultask(mSMDebug), "AILookupTask() [" << (void*)this << "]"); }
+  GetAddrInfo( DEBUG_ONLY(bool debug = false) ) DEBUG_ONLY(: AIStatefulTask(debug))
+    { DoutEntering(dc::statefultask(mSMDebug), "GetAddrInfo() [" << (void*)this << "]"); }
 
   /*!
    * @brief Start the lookup of hostname that needs to be resolved.
@@ -104,10 +107,10 @@ class AILookupTask : public AIStatefulTask
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       void>::type
-  getaddrinfo(S1&& node, in_port_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
+  init(S1&& node, in_port_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
     m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node), port, hints);
-    m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
+    m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
   /*!
@@ -121,11 +124,11 @@ class AILookupTask : public AIStatefulTask
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       void>::type
-  getaddrinfo(S1&& node, char const* service, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
+  init(S1&& node, char const* service, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
     m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node),
         resolver::Resolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
-    m_handle = m_result->event_server().request(*this, &AILookupTask::done, m_busy_interface);
+    m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
   /*!
@@ -157,7 +160,7 @@ class AILookupTask : public AIStatefulTask
 
  protected:
   //! Call finish() (or abort()), not delete.
-  ~AILookupTask() override { DoutEntering(dc::statefultask(mSMDebug), "~AILookupTask() [" << (void*)this << "]"); m_handle.cancel(); }
+  ~GetAddrInfo() override { DoutEntering(dc::statefultask(mSMDebug), "~GetAddrInfo() [" << (void*)this << "]"); m_handle.cancel(); }
 
   //! Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
@@ -169,3 +172,5 @@ class AILookupTask : public AIStatefulTask
   // This is the callback for resolver::Resolver::HostnameCacheEntry::ready_event.
   void done(resolver::Resolver::HostnameCacheEntryReadyEvent const&);
 };
+
+} // namespace task

@@ -5,12 +5,11 @@ SUBDIRS = dns
 noinst_LTLIBRARIES = libresolvertask.la
 
 SOURCES = \
-	AILookupTask.h \
-	AILookupTask.cxx \
+	GetAddrInfo.h \
+	GetAddrInfo.cxx \
 	Resolver.h \
 	Resolver.cxx \
-	Lookup.h \
-	Lookup.cxx \
+	AddrInfoLookup.h \
 	AddressInfo.h \
 	AddressInfo.cxx \
 	Service.h \

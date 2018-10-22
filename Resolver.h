@@ -43,12 +43,15 @@
 struct dns_resolv_conf;
 struct dns_resolver;
 struct dns_addrinfo;
-class AILookupTask;
+
+namespace task {
+class GetAddrInfo;
+} // namespace task
 
 namespace resolver {
 
 class AddressInfoHints;
-class Lookup;
+class AddrInfoLookup;
 
 // The Resolver must be initialized, at the start of main, after the IO event loop thread.
 // A typical way that main() could start is as follows:
@@ -72,6 +75,27 @@ class Lookup;
 //   Resolver::instance().close();
 //   EventLoopThread::instance().terminate();
 // }
+//
+// Program flow for getaddrinfo is:
+// 1) GetAddrInfo::init(std::string&& node, char const* service OR in_port_t port, AddressInfoHints const& hints)
+//    Converts `service' to a port number if needed and then calls:
+// 2) Resolver::queue_getaddrinfo(std::string&& node, in_port_t port, AddressInfoHints const& hints)
+//    Looks up and/or stores node in m_hostname_cache. Returns handle to cache entry.
+//    If a new cache entry had to be created, calls:
+// 3) DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+//    If the resolver is already running, queues the new request. Otherwise calls:
+// 4) DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+//    Calls dns_ai_open(), sets m_dns_addrinfo and m_running, and calls run_dns().
+//
+// Note that the class DnsResolver gives access to libdns which isn't threadsafe; therefore
+// all accesses to DnsResolver are protected by a mutex (through Resolver::m_dns_resolver).
+//
+// Program flow for getnameinfo is:
+// 1) GetNameInfo::init(SocketAddress const& sock_address)
+// 2) Resolver::queue_getnameinfo(SocketAddress const& sock_address)
+// 3) DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+// 4) DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+//
 class Resolver : public Singleton<Resolver>
 {
   //===========================================================================================================================================================
@@ -208,8 +232,16 @@ class Resolver : public Singleton<Resolver>
 #endif
   };
 
+  struct AddressCacheEntryReadyEvent
+  {
+    static constexpr bool one_shot = true;
+#ifdef CWDEBUG
+    friend std::ostream& operator<<(std::ostream& os, AddressCacheEntryReadyEvent) { return os << "AddressCacheEntryReadyEvent"; }
+#endif
+  };
+
   // This is a single entry in the m_hostname_cache.
-  // These cache entries are accessed though class Lookup.
+  // These cache entries are accessed though class AddrInfoLookup.
   struct HostnameCacheEntry
   {
     std::string str;            // Node name.
@@ -229,7 +261,7 @@ class Resolver : public Singleton<Resolver>
     std::atomic_bool ready;     // Set when the query on str/hints finished.
     events::Server<HostnameCacheEntryReadyEvent> m_ready_event;   // Event server for "becoming ready", specific for this HostnameCacheEntry.
   };
-  friend class Lookup;  // Needs access to HostnameCacheEntry.
+  friend class AddrInfoLookup;  // Needs access to HostnameCacheEntry.
 
   struct HostnameCacheEntryHash
   {
@@ -257,18 +289,18 @@ class Resolver : public Singleton<Resolver>
   using hostname_cache_ts = aithreadsafe::Wrapper<HostnameCache, aithreadsafe::policy::Primitive<std::mutex>>;
   hostname_cache_ts m_hostname_cache;
 
-  using lookup_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
-  lookup_memory_pool_ts m_lookup_memory_pool;                   // Memory pool for objects returned by queue_getaddrinfo.
+  using getaddrinfo_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
+  getaddrinfo_memory_pool_ts m_getaddrinfo_memory_pool;         // Memory pool for objects returned by queue_getaddrinfo.
 
-  friend AILookupTask;
-  std::shared_ptr<Lookup> queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
+  friend task::GetAddrInfo;
+  std::shared_ptr<AddrInfoLookup> queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
 
  public:
   // Hostname should be std::string or char const*; the template is only to allow perfect forwarding.
   template<typename S1>
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
-      std::shared_ptr<Lookup>>::type
+      std::shared_ptr<AddrInfoLookup>>::type
   getaddrinfo(S1&& node, in_port_t port, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_getaddrinfo(std::forward<std::string>(node), port, hints);
@@ -277,7 +309,7 @@ class Resolver : public Singleton<Resolver>
   template<typename S1>
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
-      std::shared_ptr<Lookup>>::type
+      std::shared_ptr<AddrInfoLookup>>::type
   getaddrinfo(S1&& node, char const* service, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_getaddrinfo(std::forward<std::string>(node), port(Service(service, hints.as_addrinfo()->ai_protocol)), hints);

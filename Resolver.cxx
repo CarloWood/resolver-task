@@ -22,7 +22,7 @@
  */
 
 #include "sys.h"
-#include "Lookup.h"
+#include "AddrInfoLookup.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
@@ -206,7 +206,7 @@ void Resolver::init(bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_lookup_memory_pool(32)
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_getaddrinfo_memory_pool(32)
 {
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
@@ -305,7 +305,7 @@ void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry
     THROW_MALERT("dns_ai_open(\"[HOSTNAME]\") [with hints '[HINTS]'] returned \"[ERROR_MSG]\".",
         AIArgs("[HOSTNAME]", m_current_lookup->str.c_str())("[HINTS]", hints_ss.str())("[ERROR_MSG]", dns_strerror(error)));
   }
-  // A previous request should already have been moved to its corresponding Lookup object in run_dns(), before we get here again.
+  // A previous request should already have been moved to its corresponding AddrInfoLookup object in run_dns(), before we get here again.
   ASSERT(m_current_lookup->result.empty());
   m_dns_addrinfo = addrinfo;
   m_running = true;
@@ -321,7 +321,7 @@ void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry
     start_getaddrinfo(new_cache_entry, hints);
 }
 
-std::shared_ptr<Lookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
+std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
 {
   DoutEntering(dc::notice, "Resolver::queue_getaddrinfo(\"" << hostname << "\", " << port << ", " << hints << ")");
 
@@ -336,11 +336,12 @@ std::shared_ptr<Lookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_p
   }
   Dout(dc::notice, (new_cache_entry ? "Insert into hostname cache took place." : "Found cached entry!"));
 
-  // If this was a new Lookup, query the DNS server(s).
+  // If this was a new AddrInfoLookup, query the DNS server(s).
   if (new_cache_entry)
     dns_resolver_ts::wat(m_dns_resolver)->queue_getaddrinfo(*new_cache_entry_ptr, hints);
 
-  return std::allocate_shared<Lookup>(utils::Allocator<Lookup, utils::NodeMemoryPool>(*lookup_memory_pool_ts::wat(m_lookup_memory_pool)), *new_cache_entry_ptr, port);
+  return std::allocate_shared<AddrInfoLookup>(utils::Allocator<AddrInfoLookup,
+      utils::NodeMemoryPool>(*getaddrinfo_memory_pool_ts::wat(m_getaddrinfo_memory_pool)), *new_cache_entry_ptr, port);
 }
 
 // Return the official protocol name of `protocol'.

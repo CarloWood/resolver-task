@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implementation of AILookupTask.
+ * @brief Implementation of GetAddrInfo.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -22,37 +22,39 @@
  */
 
 #include "sys.h"
-#include "AILookupTask.h"
+#include "GetAddrInfo.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 
-char const* AILookupTask::state_str_impl(state_type run_state) const
+namespace task {
+
+char const* GetAddrInfo::state_str_impl(state_type run_state) const
 {
   switch(run_state)
   {
-    AI_CASE_RETURN(AILookupTask_start);
-    AI_CASE_RETURN(AILookupTask_ready);
-    AI_CASE_RETURN(AILookupTask_done);
+    AI_CASE_RETURN(GetAddrInfo_start);
+    AI_CASE_RETURN(GetAddrInfo_ready);
+    AI_CASE_RETURN(GetAddrInfo_done);
   }
   ASSERT(false);
   return "UNKNOWN STATE";
 }
 
-void AILookupTask::done(resolver::Resolver::HostnameCacheEntryReadyEvent const&)
+void GetAddrInfo::done(resolver::Resolver::HostnameCacheEntryReadyEvent const&)
 {
   signal(1);
 }
 
-void AILookupTask::multiplex_impl(state_type run_state)
+void GetAddrInfo::multiplex_impl(state_type run_state)
 {
   switch (run_state)
   {
-    case AILookupTask_start:
-      wait_until([this]{ return m_result->is_ready(); }, 1, AILookupTask_ready);
+    case GetAddrInfo_start:
+      wait_until([this]{ return m_result->is_ready(); }, 1, GetAddrInfo_ready);
       break;
-    case AILookupTask_ready:
-      set_state(AILookupTask_done);
+    case GetAddrInfo_ready:
+      set_state(GetAddrInfo_done);
       // done() is not called by an engine, hence signal(1) is called by an 'immediate' handler.
       // Call yield() here to switch back to the default handler (which shouldn't be immediate),
       // before doing the call back. This is especially necessary when the call back attempts
@@ -63,8 +65,10 @@ void AILookupTask::multiplex_impl(state_type run_state)
         break;
       }
       /* FALL-THROUGH */
-    case AILookupTask_done:
+    case GetAddrInfo_done:
       finish();
       break;
   }
 }
+
+} // namespace task

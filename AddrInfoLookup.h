@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Resolve a hostname. Declaration of class Lookup.
+ * @brief Resolve a hostname. Declaration of class AddrInfoLookup.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -31,7 +31,8 @@ extern "C" {
 
 namespace resolver {
 
-class Lookup
+// Represents a running GetAddrInfo lookup.
+class AddrInfoLookup
 {
   using HostnameCacheEntry = Resolver::HostnameCacheEntry;
 
@@ -40,10 +41,10 @@ class Lookup
    in_port_t m_port;
 
  public:
-  Lookup(std::shared_ptr<HostnameCacheEntry> const& hostname_cache, in_port_t port) :
+  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry> const& hostname_cache, in_port_t port) :
       m_hostname_cache(hostname_cache), m_port(port) { }
 
-  Lookup(std::shared_ptr<HostnameCacheEntry>&& hostname_cache, in_port_t port) :
+  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry>&& hostname_cache, in_port_t port) :
       m_hostname_cache(std::move(hostname_cache)), m_port(port) { }
 
   std::string const& get_hostname() const { return m_hostname_cache->str; }
@@ -61,7 +62,7 @@ class Lookup
   bool success() const
   {
     // Don't call success() when is_ready() doesn't return true (you should request a callback from the event_server()).
-    // If you're using AILookupTask: only call success() from the callback or parent (after successful finish of the child).
+    // If you're using GetAddrInfo: only call success() from the callback or parent (after successful finish of the child).
     ASSERT(m_hostname_cache->is_ready());
     return m_hostname_cache->error == 0;
   }
