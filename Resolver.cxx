@@ -23,6 +23,7 @@
 
 #include "sys.h"
 #include "AddrInfoLookup.h"
+#include "NameInfoLookup.h"
 #include "dns/src/dns.h"
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
@@ -206,7 +207,7 @@ void Resolver::init(bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_getaddrinfo_memory_pool(32)
+Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_address_cache(128), m_getaddrinfo_memory_pool(32), m_getnameinfo_memory_pool(32)
 {
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
@@ -262,52 +263,147 @@ void Resolver::DnsResolver::run_dns()
       if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
         break;
 
-      m_current_lookup->result.add(addrinfo);
+      m_current_addrinfo_lookup->result.add(addrinfo);
     }
 
     if (error == EAGAIN)
       return;
 
     if (error != ENOENT)
-      m_current_lookup->error = error;
+      m_current_addrinfo_lookup->error = error;
 
     Dout(dc::notice, "Calling set_ready()");
-    m_current_lookup->set_ready();
+    m_current_addrinfo_lookup->set_ready();
 
-    // At this point the DnsResolver is no longer busy, provided this
-    // is only checked while holding a lock on Resolver::m_dns_resolver.
-    m_running = false;
     m_dns_addrinfo = nullptr;
-
-    if (!m_getaddrinfo_queue.empty())
-    {
-      auto& next_request = m_getaddrinfo_queue.front();
-      start_getaddrinfo(next_request.first, next_request.second);
-      m_getaddrinfo_queue.pop();
-    }
   }
   else                  // We're doing a getnameinfo lookup.
   {
+    if ((error = dns_res_check(m_dns_resolver)))
+    {
+      if (error == EAGAIN)
+        return;
+
+      m_current_nameinfo_lookup->error = error;
+    }
+    else
+    {
+      struct dns_packet* P = dns_res_fetch(m_dns_resolver, &error);
+      if (!P)
+        m_current_nameinfo_lookup->error = error;
+      else
+      {
+#if 0
+        // Print packet header.
+        Dout(dc::notice, ";; [HEADER]");
+        Dout(dc::notice, ";;    qid : " << ntohs(dns_header(P)->qid));
+        Dout(dc::notice, ";;     qr : " << ((dns_header(P)->qr)? "RESPONSE" : "QUERY") << '(' << dns_header(P)->qr << ')');
+        Dout(dc::notice, ";; opcode : " << dns_stropcode((dns_opcode)dns_header(P)->opcode) << '(' << dns_header(P)->opcode << ')');
+        Dout(dc::notice, ";;     aa : " << ((dns_header(P)->aa)? "AUTHORITATIVE" : "NON-AUTHORITATIVE") << '(' << dns_header(P)->aa << ')');
+        Dout(dc::notice, ";;     tc : " << ((dns_header(P)->tc)? "TRUNCATED" : "NOT-TRUNCATED") << '(' << dns_header(P)->tc << ')');
+        Dout(dc::notice, ";;     rd : " << ((dns_header(P)->rd)? "RECURSION-DESIRED" : "RECURSION-NOT-DESIRED") << '(' << dns_header(P)->rd << ')');
+        Dout(dc::notice, ";;     ra : " << ((dns_header(P)->ra)? "RECURSION-ALLOWED" : "RECURSION-NOT-ALLOWED") << '(' << dns_header(P)->ra << ')');
+        Dout(dc::notice, ";;  rcode : " << dns_strrcode(dns_p_rcode(P)) << '(' << dns_p_rcode(P) << ')');
+
+        enum dns_section section = (dns_section)0;
+#endif
+
+        struct dns_rr rr;
+        struct dns_rr_i rr_i;
+        std::memset(&rr_i, 0, sizeof(rr_i));
+        rr_i.sort = &dns_rr_i_packet;
+
+        while (dns_rr_grep(&rr, 1, &rr_i, P, &error))
+        {
+#if 0
+          // Print section headers.
+          if (section != rr.section)
+          {
+            char section_str_buf[DNS_STRMAXLEN + 1];
+            char const* section_str = dns_strsection(rr.section, section_str_buf, sizeof(section_str_buf));
+            Dout(dc::notice, "");
+            Dout(dc::notice, ";; [" << section_str << ":" << dns_p_count(P, rr.section) << "]");
+            section = rr.section;
+          }
+
+          // Print section lines.
+          char section_line_str[2 * sizeof(dns_any)];
+          if (dns_rr_print(section_line_str, sizeof(section_line_str), &rr, P, &error))
+            Dout(dc::notice, section_line_str);
+#endif
+          // Look for the answer section.
+          if (rr.section != DNS_S_AN)
+            continue;
+
+          ASSERT(rr.class_ == DNS_C_IN);
+          ASSERT(rr.type == DNS_T_PTR);
+
+          union dns_any any;
+          if ((error = dns_any_parse(dns_any_init(&any, sizeof(any)), &rr, P)))
+            break;
+
+          m_current_nameinfo_lookup->result = any.ptr.host;
+          // Strip off the trailing dot.
+          ASSERT(!m_current_nameinfo_lookup->result.empty());
+          m_current_nameinfo_lookup->result.pop_back();
+
+          break;
+        }
+        std::free(P);
+      }
+    }
+
+    Dout(dc::notice, "Calling set_ready()");
+    m_current_nameinfo_lookup->set_ready();
+  }
+
+  // At this point the DnsResolver is no longer busy, provided this
+  // is only checked while holding a lock on Resolver::m_dns_resolver.
+  m_running = false;
+
+  // FIXME: make this one queue? So that things get processed in order...
+  if (!m_getaddrinfo_queue.empty())
+  {
+    auto& next_request = m_getaddrinfo_queue.front();
+    start_getaddrinfo(next_request.first, next_request.second);
+    m_getaddrinfo_queue.pop();
+  }
+  else if (!m_getnameinfo_queue.empty())
+  {
+    auto& next_request = m_getnameinfo_queue.front();
+    start_getnameinfo(next_request);
+    m_getnameinfo_queue.pop();
   }
 }
 
 void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
-  m_current_lookup = new_cache_entry;
+  m_current_addrinfo_lookup = new_cache_entry;
   // Call Resolver.instance().init() at the start of main() to initialize the resolver.
   ASSERT(m_dns_resolver);
   int error = 0;        // Must be set to 0.
-  struct dns_addrinfo* addrinfo = dns_ai_open(m_current_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
+  struct dns_addrinfo* addrinfo = dns_ai_open(m_current_addrinfo_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
   if (!addrinfo)
-  {
-    std::ostringstream hints_ss;
-    hints_ss << hints;
-    THROW_MALERT("dns_ai_open(\"[HOSTNAME]\") [with hints '[HINTS]'] returned \"[ERROR_MSG]\".",
-        AIArgs("[HOSTNAME]", m_current_lookup->str.c_str())("[HINTS]", hints_ss.str())("[ERROR_MSG]", dns_strerror(error)));
-  }
+    THROW_MALERT("dns_ai_open(\"[HOSTNAME]\") [with hints '[HINTS]'] returned \"[ERROR_MSG]\"",
+        AIArgs("[HOSTNAME]", m_current_addrinfo_lookup->str)("[HINTS]", hints)("[ERROR_MSG]", dns_strerror(error)));
   // A previous request should already have been moved to its corresponding AddrInfoLookup object in run_dns(), before we get here again.
-  ASSERT(m_current_lookup->result.empty());
+  ASSERT(m_current_addrinfo_lookup->result.empty());
   m_dns_addrinfo = addrinfo;
+  m_running = true;
+  run_dns();
+}
+
+void Resolver::DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+{
+  m_current_nameinfo_lookup = new_cache_entry;
+  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
+  ASSERT(m_dns_resolver);
+  int error = dns_res_submit(m_dns_resolver, new_cache_entry->arpa_str.c_str(), DNS_T_PTR, DNS_C_IN);
+  if (error)
+    THROW_MALERT("dns_res_submit(\"[ARPANAME]\") returned \"[ERROR_MSG]\"",
+        AIArgs("[ARPANAME]", new_cache_entry->arpa_str)("[ERROR_MSG]", dns_strerror(error)));
+  // m_dns_addrinfo is to nullptr at the same time that m_running is set to false (and we should never get here while m_running is already set).
+  ASSERT(!m_dns_addrinfo);
   m_running = true;
   run_dns();
 }
@@ -319,6 +415,15 @@ void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry
     m_getaddrinfo_queue.emplace(new_cache_entry, hints);
   else
     start_getaddrinfo(new_cache_entry, hints);
+}
+
+void Resolver::DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+{
+  // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
+  if (m_running)
+    m_getnameinfo_queue.emplace(new_cache_entry);
+  else
+    start_getnameinfo(new_cache_entry);
 }
 
 std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
@@ -342,6 +447,31 @@ std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostna
 
   return std::allocate_shared<AddrInfoLookup>(utils::Allocator<AddrInfoLookup,
       utils::NodeMemoryPool>(*getaddrinfo_memory_pool_ts::wat(m_getaddrinfo_memory_pool)), *new_cache_entry_ptr, port);
+}
+
+std::shared_ptr<NameInfoLookup> Resolver::getnameinfo(evio::SocketAddress const& address)
+{
+  DoutEntering(dc::notice, "Resolver::getnameinfo(" << address << ")");
+
+  bool new_cache_entry;
+  std::shared_ptr<AddressCacheEntry> const* new_cache_entry_ptr;
+  {
+    address_cache_ts::wat address_cache_w(m_address_cache);
+    utils::Allocator<AddressCacheEntry, utils::NodeMemoryPool> address_cache_allocator(address_cache_w->memory_pool);
+    evio::SocketAddress::arpa_buf_t buf;
+    address.ptr_qname(buf);
+    auto insert_result = address_cache_w->unordered_set.insert(std::allocate_shared<AddressCacheEntry>(address_cache_allocator, std::string(buf.data(), buf.size())));
+    new_cache_entry_ptr = &*insert_result.first;
+    new_cache_entry = insert_result.second;
+  }
+  Dout(dc::notice, (new_cache_entry ? "Insert into address cache took place." : "Found cached entry!"));
+
+  // If this was a new NameInfoLookup, query the DNS server(s).
+  if (new_cache_entry)
+    dns_resolver_ts::wat(m_dns_resolver)->queue_getnameinfo(*new_cache_entry_ptr);
+
+  return std::allocate_shared<NameInfoLookup>(utils::Allocator<NameInfoLookup,
+      utils::NodeMemoryPool>(*getnameinfo_memory_pool_ts::wat(m_getnameinfo_memory_pool)), *new_cache_entry_ptr);
 }
 
 // Return the official protocol name of `protocol'.

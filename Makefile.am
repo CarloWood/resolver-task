@@ -7,6 +7,9 @@ noinst_LTLIBRARIES = libresolvertask.la
 SOURCES = \
 	GetAddrInfo.h \
 	GetAddrInfo.cxx \
+	GetNameInfo.h \
+	GetNameInfo.cxx \
+	GetNameInfoLookup.h \
 	Resolver.h \
 	Resolver.cxx \
 	AddrInfoLookup.h \

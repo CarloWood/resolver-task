@@ -46,12 +46,14 @@ struct dns_addrinfo;
 
 namespace task {
 class GetAddrInfo;
+class GetNameInfo;
 } // namespace task
 
 namespace resolver {
 
 class AddressInfoHints;
 class AddrInfoLookup;
+class NameInfoLookup;
 
 // The Resolver must be initialized, at the start of main, after the IO event loop thread.
 // A typical way that main() could start is as follows:
@@ -77,7 +79,7 @@ class AddrInfoLookup;
 // }
 //
 // Program flow for getaddrinfo is:
-// 1) GetAddrInfo::init(std::string&& node, char const* service OR in_port_t port, AddressInfoHints const& hints)
+// 1) task::GetAddrInfo::init(std::string&& node, char const* service OR in_port_t port, AddressInfoHints const& hints)
 //    Converts `service' to a port number if needed and then calls:
 // 2) Resolver::queue_getaddrinfo(std::string&& node, in_port_t port, AddressInfoHints const& hints)
 //    Looks up and/or stores node in m_hostname_cache. Returns handle to cache entry.
@@ -91,7 +93,7 @@ class AddrInfoLookup;
 // all accesses to DnsResolver are protected by a mutex (through Resolver::m_dns_resolver).
 //
 // Program flow for getnameinfo is:
-// 1) GetNameInfo::init(SocketAddress const& sock_address)
+// 1) task::GetNameInfo::init(SocketAddress const& sock_address)
 // 2) Resolver::queue_getnameinfo(SocketAddress const& sock_address)
 // 3) DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
 // 4) DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
@@ -140,6 +142,7 @@ class Resolver : public Singleton<Resolver>
   };
 
   struct HostnameCacheEntry;
+  struct AddressCacheEntry;
 
   // This is a trick; instead of wrapping the actual struct we wrap
   // the pointer to it. Of course this means we need to keep this
@@ -150,7 +153,9 @@ class Resolver : public Singleton<Resolver>
     struct dns_addrinfo* m_dns_addrinfo;        // Has to be protected too because it contains a pointer to dns_resolver.
     bool m_running;
     std::queue<std::pair<std::shared_ptr<HostnameCacheEntry>, AddressInfoHints>> m_getaddrinfo_queue;
-    std::shared_ptr<HostnameCacheEntry> m_current_lookup;
+    std::queue<std::shared_ptr<AddressCacheEntry>> m_getnameinfo_queue;
+    std::shared_ptr<HostnameCacheEntry> m_current_addrinfo_lookup;
+    std::shared_ptr<AddressCacheEntry> m_current_nameinfo_lookup;
    public:
     DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr), m_running(false) { }
     ~DnsResolver() noexcept { } // Without this I get a silly compiler warning about failing to inline the destructor.
@@ -158,6 +163,8 @@ class Resolver : public Singleton<Resolver>
     struct dns_resolver* get() const { return m_dns_resolver; }
     void start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
     void queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
+    void start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry);
+    void queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry);
     void run_dns();     // Give CPU cycles to libdns.
   };
 
@@ -224,6 +231,7 @@ class Resolver : public Singleton<Resolver>
   static void dns_stop_timer();
   static void timed_out();
 
+ public:
   struct HostnameCacheEntryReadyEvent
   {
     static constexpr bool one_shot = true;
@@ -240,6 +248,7 @@ class Resolver : public Singleton<Resolver>
 #endif
   };
 
+ private:
   // This is a single entry in the m_hostname_cache.
   // These cache entries are accessed though class AddrInfoLookup.
   struct HostnameCacheEntry
@@ -263,11 +272,41 @@ class Resolver : public Singleton<Resolver>
   };
   friend class AddrInfoLookup;  // Needs access to HostnameCacheEntry.
 
+  // This is a single entry in the m_address_cache.
+  // These cache entries are accessed though class NameInfoLookup.
+  struct AddressCacheEntry
+  {
+    std::string arpa_str;       // Arpa node name of SocketAddress.
+    std::string result;         // The result (canonical name) of the query, only valid when ready is true and error is zero.
+    int error;                  // If ready is true then this can be checked to see if there was an error.
+
+    AddressCacheEntry(std::string&& arpa_str) : arpa_str(std::move(arpa_str)), error(0), ready(false) { }
+
+    bool is_ready() const { return ready.load(std::memory_order_acquire); }
+    void set_ready() { ready.store(true, std::memory_order_release); m_ready_event.trigger(ready_event); }
+    int get_error() const { return error; }
+    auto& event_server() { return m_ready_event; }
+
+   private:
+    static constexpr AddressCacheEntryReadyEvent ready_event = { };
+    std::atomic_bool ready;     // Set when the query on arpa_str finished.
+    events::Server<AddressCacheEntryReadyEvent> m_ready_event;  // Event server for "becoming ready", specific for this AddressCacheEntry.
+  };
+  friend class NameInfoLookup;  // Needs access to AddressCacheEntry.
+
   struct HostnameCacheEntryHash
   {
     uint64_t operator()(std::shared_ptr<HostnameCacheEntry> const& hostname_cache_entry) const
     {
       return util::Hash64WithSeeds(hostname_cache_entry->str.data(), hostname_cache_entry->str.length(), 0x9ae16a3b2f90404fULL, hostname_cache_entry->hints);
+    }
+  };
+
+  struct AddressCacheEntryHash
+  {
+    uint64_t operator()(std::shared_ptr<AddressCacheEntry> const& address_cache_entry) const
+    {
+      return util::Hash64WithSeed(address_cache_entry->arpa_str.data(), address_cache_entry->arpa_str.length(), 0x9ae16a3b2f90404fULL);
     }
   };
 
@@ -279,6 +318,14 @@ class Resolver : public Singleton<Resolver>
     }
   };
 
+  struct AddressCacheEntryEqualTo
+  {
+    bool operator()(std::shared_ptr<AddressCacheEntry> const& address_cache_entry1, std::shared_ptr<AddressCacheEntry> const& address_cache_entry2) const
+    {
+      return address_cache_entry1->arpa_str == address_cache_entry2->arpa_str;
+    }
+  };
+
   struct HostnameCache
   {
     utils::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_hostname_cache.
@@ -286,16 +333,31 @@ class Resolver : public Singleton<Resolver>
     HostnameCache(int nchunks) : memory_pool(nchunks) { }
   };
 
+  struct AddressCache
+  {
+    utils::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_address_cache.
+    std::unordered_set<std::shared_ptr<AddressCacheEntry>, AddressCacheEntryHash, AddressCacheEntryEqualTo> unordered_set;
+    AddressCache(int nchunks) : memory_pool(nchunks) { }
+  };
+
   using hostname_cache_ts = aithreadsafe::Wrapper<HostnameCache, aithreadsafe::policy::Primitive<std::mutex>>;
   hostname_cache_ts m_hostname_cache;
 
+  using address_cache_ts = aithreadsafe::Wrapper<AddressCache, aithreadsafe::policy::Primitive<std::mutex>>;
+  address_cache_ts m_address_cache;
+
   using getaddrinfo_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
   getaddrinfo_memory_pool_ts m_getaddrinfo_memory_pool;         // Memory pool for objects returned by queue_getaddrinfo.
+
+  using getnameinfo_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
+  getnameinfo_memory_pool_ts m_getnameinfo_memory_pool;         // Memory pool for objects returned by queue_getnameinfo.
 
   friend task::GetAddrInfo;
   std::shared_ptr<AddrInfoLookup> queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
 
  public:
+  std::shared_ptr<NameInfoLookup> getnameinfo(evio::SocketAddress const& address);
+
   // Hostname should be std::string or char const*; the template is only to allow perfect forwarding.
   template<typename S1>
   typename std::enable_if<

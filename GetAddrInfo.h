@@ -27,12 +27,13 @@
 #include "AddressInfo.h"
 #include "AddrInfoLookup.h"
 #include "debug.h"
+#include "events/Events.h"
 #include <atomic>
 
 /*!
  * @brief The resolver task.
  *
- * Before calling @link group_run run()@endlink, call getaddrinfo() to pass needed parameters.
+ * Before calling @link group_run run()@endlink, call init() to pass needed parameters.
  *
  * When the task finishes it calls the callback, use parameter _1,
  * (success) to check whether or not the task actually finished or
@@ -45,14 +46,14 @@
  * Typical usage:
  *
  * @code
- * GetAddrInfo* resolver = new GetAddrInfo;
+ * task::GetAddrInfo* resolver = new task::GetAddrInfo;
  *
- * resolver->getaddrinfo("www.google.com", 80);  // As usual, this initializes the task before running it; don't call getaddrinfo() multiple times.
- * resolver->run(...);          // Start hostname lookup and pass callback; see AIStatefulTask.
+ * resolver->init("www.google.com", 80);        // As usual, this initializes the task before running it; don't call init() multiple times.
+ * resolver->run(...);                          // Start hostname lookup and pass callback; see AIStatefulTask.
  * @endcode
  *
  * The default behavior is to call the callback and then delete the GetAddrInfo object.
- * It is allowed to call getaddrinfo() followed by run() from within the callback function
+ * It is allowed to call init() followed by run() from within the callback function
  * to start another look up though.
  *
  * In the callback / parent task use,
