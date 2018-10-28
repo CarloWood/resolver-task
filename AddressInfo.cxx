@@ -115,4 +115,45 @@ void AddressInfoList::add(struct addrinfo* addrinfo)
   *ptr = addrinfo;
 }
 
+//static
+size_t AddressInfo::alloc_size(struct addrinfo* ai)
+{
+  size_t size = sizeof(struct addrinfo);
+  int family = ai->ai_addr->sa_family;
+  // Don't call this function otherwise.
+  ASSERT(family == AF_INET || family == AF_INET6);
+  size += (family == AF_INET) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+  size += ai->ai_canonname ? strlen(ai->ai_canonname) + 1 : 0;
+  return size;
+}
+
+void AddressInfo::deep_copy(AddressInfo const& address_info)
+{
+  // Only use this function of default constructed objects, or call clear() first.
+  ASSERT(!m_addrinfo);
+  struct addrinfo** ptr = &m_addrinfo;
+  struct addrinfo* from = address_info.m_addrinfo;
+  do
+  {
+    size_t const size = alloc_size(from);
+    *ptr = static_cast<struct addrinfo*>(std::malloc(size));
+    std::memcpy(*ptr, from, size);
+    // Can't have an ai_canonname without a sockaddr, right?
+    ASSERT((*ptr)->ai_addr || !(*ptr)->ai_canonname);
+    if ((*ptr)->ai_addr)
+    {
+      (*ptr)->ai_addr = reinterpret_cast<struct sockaddr*>(*ptr + 1);
+      if ((*ptr)->ai_canonname)
+      {
+        int family = (*ptr)->ai_addr->sa_family;
+        // Not supported.
+        ASSERT(family == AF_INET || family == AF_INET6);
+        (*ptr)->ai_canonname = reinterpret_cast<char*>((*ptr)->ai_addr) + ((family == AF_INET) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
+      }
+    }
+    ptr = &(*ptr)->ai_next;
+  }
+  while ((from = *ptr));
+}
+
 } // namespace resolver

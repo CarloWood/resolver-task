@@ -52,6 +52,22 @@
  * resolver->run(...);                          // Start hostname lookup and pass callback; see AIStatefulTask.
  * @endcode
  *
+ * If there is a good chance that the hostname was already resolved, one can try instead:
+ *
+ * @code
+ * auto cached = resolver::Resolver::instance().getaddrinfo("www.google.com", 80);
+ * if (!cached->is_ready())
+ * {
+ *   task::GetAddrInfo* resolver = new task::GetAddrInfo;
+ *   resolver->init(cached);
+ *   resolver->run(...);
+ * }
+ * else if (cached->success())
+ *   // Use cached->get_result()
+ * else
+ *   // Use cached->get_error()
+ * @endcode
+ *
  * The default behavior is to call the callback and then delete the GetAddrInfo object.
  * It is allowed to call init() followed by run() from within the callback function
  * to start another look up though.
@@ -129,6 +145,14 @@ class GetAddrInfo : public AIStatefulTask
   {
     m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node),
         resolver::Resolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
+    m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
+  }
+
+  // This method allows checking if a given hostname was already resolved before without
+  // creating a new GetAddrInfo task every time.
+  void init(std::shared_ptr<resolver::AddrInfoLookup> const& lookup)
+  {
+    m_result = lookup;
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 

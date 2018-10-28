@@ -263,6 +263,7 @@ void Resolver::DnsResolver::run_dns()
       if ((error = dns_ai_nextent(&addrinfo, m_dns_addrinfo)))
         break;
 
+      // addrinfo is allocated on the heap (in dns_ai_setent in src/dns.c).
       m_current_addrinfo_lookup->result.add(addrinfo);
     }
 

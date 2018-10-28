@@ -1,6 +1,7 @@
 #pragma once
 
 #include "evio/SocketAddress.h"
+#include "debug.h"
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -40,23 +41,32 @@ class AddressInfoHints
   friend std::ostream& operator<<(std::ostream& os, AddressInfoHints const& hints);
 };
 
+// A simple wrapper around a struct addrinfo*.
 class AddressInfo
 {
  protected:
-  struct addrinfo* m_addrinfo;
+  struct addrinfo* m_addrinfo;  // Allocated on the heap with a size that includes its ai_addr and ai_canonname if specified.
+
+  // Return the size of the allocation (see dns_ai_setent).
+  static size_t alloc_size(struct addrinfo* ai);
 
  protected:
   AddressInfo() : m_addrinfo(nullptr) { }
   AddressInfo(AddressInfo&& addrinfo) : m_addrinfo(addrinfo.m_addrinfo) { addrinfo.m_addrinfo = nullptr; }
-  AddressInfo(struct addrinfo* addrinfo) : m_addrinfo(addrinfo) { }
   virtual ~AddressInfo() { }
+
+  // Construct an AddressInfo from an addrinfo that was allocated on the heap.
+  // ai_addr and ai_cannonname must be either nullptr or point inside the SAME allocation
+  // (so that a single std::free(addrinfo) is enough to free all of it.
+  // This demands holds recursively for a non-null ai_next pointer.
+  AddressInfo(struct addrinfo* addrinfo, bool) : m_addrinfo(addrinfo) { }
 
   // Disallow (move) assignment.
   AddressInfo& operator=(AddressInfo const& addrinfo) = delete;
 
  public:
   bool empty() const { return !m_addrinfo; }
-  AddressInfo next() const { return AddressInfo(m_addrinfo->ai_next); }
+  AddressInfo next() const { return AddressInfo(m_addrinfo->ai_next, true); }
   evio::SocketAddress addr() const { return m_addrinfo->ai_addr; }
 
   int flags() const { return m_addrinfo->ai_flags; }
@@ -68,18 +78,30 @@ class AddressInfo
   operator struct addrinfo*() { return m_addrinfo; }
   operator struct addrinfo const*() const { return m_addrinfo; }
 
+  // Rather expensive (does a call to malloc for each entry in the list and then memcpy's the data over).
+  void deep_copy(AddressInfo const& address_info);
+
   friend std::ostream& operator<<(std::ostream& os, AddressInfo const& addrinfo);
 };
 
 class AddressInfoList : public AddressInfo
 {
  public:
-  AddressInfoList(AddressInfoHints const& hints) : AddressInfo(static_cast<struct addrinfo*>(std::malloc(sizeof(struct addrinfo))))
-    { std::memcpy(m_addrinfo, hints.as_addrinfo(), sizeof(struct addrinfo)); }
+  AddressInfoList(AddressInfoHints const& hints) : AddressInfo(static_cast<struct addrinfo*>(std::malloc(sizeof(struct addrinfo))), true)
+  {
+    std::memcpy(m_addrinfo, hints.as_addrinfo(), sizeof(struct addrinfo));
+    // That memcpy only works when the addrinfo is trivial copyable... Make sure that all pointers are null.
+    ASSERT(m_addrinfo->ai_addr == nullptr && m_addrinfo->ai_canonname == nullptr && m_addrinfo->ai_next == nullptr);
+  }
   AddressInfoList(AddressInfoList&& addrinfo) : AddressInfo(std::move(addrinfo)) { }
-  AddressInfoList(struct addrinfo* addrinfo) : AddressInfo(addrinfo) { }
   AddressInfoList() { }
   ~AddressInfoList() { clear(); }
+
+  // Construct an AddressInfoList from an addrinfo that was allocated on the heap.
+  // ai_addr and ai_cannonname must be either nullptr or point inside the SAME allocation
+  // (so that a single std::free(addrinfo) is enough to free all of it.
+  // This demands holds recursively for a non-null ai_next pointer.
+  AddressInfoList(struct addrinfo* addrinfo, bool) : AddressInfo(addrinfo, true) { }
 
   // Only allow move assignment.
   AddressInfoList& operator=(AddressInfoList&& addrinfo) { m_addrinfo = addrinfo.m_addrinfo; addrinfo.m_addrinfo = nullptr; return *this; }
@@ -88,6 +110,13 @@ class AddressInfoList : public AddressInfo
   struct addrinfo*& raw_ref() { return m_addrinfo; }
 
   void clear();
+
+  // Add an addrinfo object to the end of the list.
+  // addrinfo must be allocated on the heap.
+  // ai_addr and ai_cannonname must be either nullptr or point inside the SAME allocation
+  // (so that a single std::free(addrinfo) is enough to free all of it.
+  // This demands holds recursively for a non-null ai_next pointer.
+  // This function should really only be used by Resolver::DnsResolver::run_dns().
   void add(struct addrinfo* addrinfo);
 };
 
