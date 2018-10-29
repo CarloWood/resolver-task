@@ -38,6 +38,15 @@ char const* GetNameInfo::state_str_impl(state_type run_state) const
   return "UNKNOWN STATE";
 }
 
+void GetNameInfo::initialize_impl()
+{
+  DoutEntering(dc::statefultask(mSMDebug), "GetNameInfo::initialize_impl() [" << (void*)this << "]");
+  set_state(GetNameInfo_start);
+  // This isn't going to work. Please call GetNameInfo::run() with a non-immediate handler,
+  // for example resolver::Resolver::instance().get_handler();
+  ASSERT(!default_is_immediate());
+}
+
 void GetNameInfo::done(resolver::Resolver::AddressCacheEntryReadyEvent const&)
 {
   signal(1);

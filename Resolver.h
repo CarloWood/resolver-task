@@ -69,7 +69,7 @@ class NameInfoLookup;
 //   // Initialize the IO event loop thread.
 //   EventLoopThread::instance().init(handler);
 //   // Initialize the async hostname resolver.
-//   Resolver::instance().init(recurse);        // recurse is a boolean (true or false).
+//   Resolver::instance().init(handler, recurse);        // recurse is a boolean (true or false).
 //
 //...
 //
@@ -112,7 +112,7 @@ class Resolver : public Singleton<Resolver>
   Resolver(Resolver const&) = delete;
 
  public:
-  void init(bool recurse);
+  void init(AIQueueHandle handler, bool recurse);
 
   //===========================================================================================================================================================
   //
@@ -175,8 +175,11 @@ class Resolver : public Singleton<Resolver>
   using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<SocketDevice>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
   socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
 
+  AIQueueHandle m_handler;
+
  public:
   void close();
+  AIQueueHandle get_handler() const { return m_handler; }
 
   //===========================================================================================================================================================
   //

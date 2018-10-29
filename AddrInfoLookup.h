@@ -78,6 +78,9 @@ class AddrInfoLookup
     ASSERT(m_hostname_cache->error);
     return dns_strerror(m_hostname_cache->error);
   }
+
+  // Support writing to ostream.
+  friend std::ostream& operator<<(std::ostream& os, AddrInfoLookup const& addr_info_lookup);
 };
 
 } // namespace resolver

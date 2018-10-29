@@ -49,7 +49,7 @@
  * task::GetAddrInfo* resolver = new task::GetAddrInfo;
  *
  * resolver->init("www.google.com", 80);        // As usual, this initializes the task before running it; don't call init() multiple times.
- * resolver->run(...);                          // Start hostname lookup and pass callback; see AIStatefulTask.
+ * resolver->run(resolver::Resolver::instance().get_handler(), ...);    // Start hostname lookup and pass callback; see AIStatefulTask.
  * @endcode
  *
  * If there is a good chance that the hostname was already resolved, one can try instead:
@@ -60,7 +60,7 @@
  * {
  *   task::GetAddrInfo* resolver = new task::GetAddrInfo;
  *   resolver->init(cached);
- *   resolver->run(...);
+ *   resolver->run(resolver::Resolver::instance().get_handler(), ...);
  * }
  * else if (cached->success())
  *   // Use cached->get_result()
@@ -71,6 +71,9 @@
  * The default behavior is to call the callback and then delete the GetAddrInfo object.
  * It is allowed to call init() followed by run() from within the callback function
  * to start another look up though.
+ *
+ * It is perfectly OK to pass some other handler/engine to run() than Resolver::get_handler(),
+ * just as long as you pass something (not an immediate handler).
  *
  * In the callback / parent task use,
  *
@@ -189,6 +192,9 @@ class GetAddrInfo : public AIStatefulTask
 
   //! Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
+
+  //! Run bs_initialize.
+  void initialize_impl() override;
 
   //! Handle mRunState.
   void multiplex_impl(state_type run_state) override;

@@ -141,6 +141,9 @@ class GetNameInfo : public AIStatefulTask
   //! Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
 
+  //! Run bs_initialize.
+  void initialize_impl() override;
+
   //! Handle mRunState.
   void multiplex_impl(state_type run_state) override;
 

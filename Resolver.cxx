@@ -143,8 +143,11 @@ void Resolver::SocketDevice::read_from_fd(int DEBUG_ONLY(fd))
   dns_resolver_w->run_dns();
 }
 
-void Resolver::init(bool recurse)
+void Resolver::init(AIQueueHandle handler, bool recurse)
 {
+  // Just remember some non-immediate handler for use by GetAddrInfo and GetNameInfo tasks.
+  m_handler = handler;
+
   // Initialize dns.
   static struct dns_options const opts = { { nullptr, nullptr }, dns_options::DNS_LIBEVENT };
   int error = 0;
@@ -380,7 +383,7 @@ void Resolver::DnsResolver::run_dns()
 void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   m_current_addrinfo_lookup = new_cache_entry;
-  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
+  // Call Resolver.instance().init(false) at the start of main() to initialize the resolver.
   ASSERT(m_dns_resolver);
   int error = 0;        // Must be set to 0.
   struct dns_addrinfo* addrinfo = dns_ai_open(m_current_addrinfo_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);

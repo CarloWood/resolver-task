@@ -41,6 +41,15 @@ char const* GetAddrInfo::state_str_impl(state_type run_state) const
   return "UNKNOWN STATE";
 }
 
+void GetAddrInfo::initialize_impl()
+{
+  DoutEntering(dc::statefultask(mSMDebug), "GetAddrInfo::initialize_impl() [" << (void*)this << "]");
+  set_state(GetAddrInfo_start);
+  // This isn't going to work. Please call GetAddrInfo::run() with a non-immediate handler,
+  // for example resolver::Resolver::instance().get_handler();
+  ASSERT(!default_is_immediate());
+}
+
 void GetAddrInfo::done(resolver::Resolver::HostnameCacheEntryReadyEvent const&)
 {
   signal(1);

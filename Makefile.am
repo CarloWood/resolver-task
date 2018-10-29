@@ -10,6 +10,7 @@ SOURCES = \
 	GetNameInfo.h \
 	GetNameInfo.cxx \
 	GetNameInfoLookup.h \
+	AddrInfoLookup.cxx \
 	Resolver.h \
 	Resolver.cxx \
 	AddrInfoLookup.h \
