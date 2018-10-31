@@ -79,6 +79,12 @@ class AddrInfoLookup
     return dns_strerror(m_hostname_cache->error);
   }
 
+  // Return the hostname that is the lookup for.
+  std::string const& hostname() const { return m_hostname_cache->str; }
+
+  // Set some custom error.
+  void set_error_empty() { m_hostname_cache->set_error_empty(); }
+
   // Support writing to ostream.
   friend std::ostream& operator<<(std::ostream& os, AddrInfoLookup const& addr_info_lookup);
 };

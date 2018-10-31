@@ -380,6 +380,13 @@ void Resolver::DnsResolver::run_dns()
   }
 }
 
+void Resolver::HostnameCacheEntry::set_error_empty()
+{
+  // Don't overwrite a real error.
+  ASSERT(error == 0);
+  error = DNS_EEMPTY;
+}
+
 void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   m_current_addrinfo_lookup = new_cache_entry;

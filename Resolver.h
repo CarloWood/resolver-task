@@ -265,6 +265,7 @@ class Resolver : public Singleton<Resolver>
 
     bool is_ready() const { return ready.load(std::memory_order_acquire); }
     void set_ready() { ready.store(true, std::memory_order_release); m_ready_event.trigger(ready_event); }
+    void set_error_empty();
     int get_error() const { return error; }
     auto& event_server() { return m_ready_event; }
 
