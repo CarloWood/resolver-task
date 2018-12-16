@@ -38,20 +38,20 @@ class AddrInfoLookup
 
  private:
    std::shared_ptr<HostnameCacheEntry> m_hostname_cache;
-   in_port_t m_port;
+   uint16_t m_port;
 
  public:
-  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry> const& hostname_cache, in_port_t port) :
+  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry> const& hostname_cache, uint16_t port) :
       m_hostname_cache(hostname_cache), m_port(port) { }
 
-  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry>&& hostname_cache, in_port_t port) :
+  AddrInfoLookup(std::shared_ptr<HostnameCacheEntry>&& hostname_cache, uint16_t port) :
       m_hostname_cache(std::move(hostname_cache)), m_port(port) { }
 
   std::string const& get_hostname() const { return m_hostname_cache->str; }
   uint32_t get_hints() const { return m_hostname_cache->hints; }
 
   // Accessor.
-  in_port_t get_port() const { return m_port; }
+  uint16_t get_port() const { return m_port; }
 
   // Return the events::Server that will get triggered after is_ready is set.
   auto& event_server() const { return m_hostname_cache->event_server(); }

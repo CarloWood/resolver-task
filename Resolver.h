@@ -27,9 +27,9 @@
 #include "AddressInfo.h"
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
-#include "evio/Device.h"
+#include "evio/InputDevice.h"
 #include "farmhash/src/farmhash.h"
-#include "statefultask/Timer.h"
+#include "threadpool/Timer.h"
 #include "events/Events.h"
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
@@ -79,9 +79,9 @@ class NameInfoLookup;
 // }
 //
 // Program flow for getaddrinfo is:
-// 1) task::GetAddrInfo::init(std::string&& node, char const* service OR in_port_t port, AddressInfoHints const& hints)
+// 1) task::GetAddrInfo::init(std::string&& node, char const* service OR uint16_t port, AddressInfoHints const& hints)
 //    Converts `service' to a port number if needed and then calls:
-// 2) Resolver::queue_getaddrinfo(std::string&& node, in_port_t port, AddressInfoHints const& hints)
+// 2) Resolver::queue_getaddrinfo(std::string&& node, uint16_t port, AddressInfoHints const& hints)
 //    Looks up and/or stores node in m_hostname_cache. Returns handle to cache entry.
 //    If a new cache entry had to be created, calls:
 // 3) DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
@@ -123,6 +123,29 @@ class Resolver : public Singleton<Resolver>
   // A socket used to connect to a DNS server (udp and/or tcp).
   class SocketDevice : public evio::InputDevice, public evio::OutputDevice
   {
+   public:
+    struct VT_type : evio::InputDevice::VT_type, evio::OutputDevice::VT_type
+    {
+    };
+
+    struct VT_impl : evio::InputDevice::VT_impl, evio::OutputDevice::VT_impl
+    {
+      // Override
+      static void write_to_fd(OutputDevice* _self, int fd);
+      static void read_from_fd(InputDevice* _self, int fd);
+
+      static constexpr VT_type VT{
+        read_from_fd,
+        read_returned_zero,
+        read_error,
+        data_received,
+        write_to_fd,
+        write_error
+      };
+    };
+
+    utils::VTPtr<SocketDevice, evio::InputDevice, evio::OutputDevice> VT_ptr;
+
    private:
     friend Resolver;
     static void* dns_created_socket(int fd);
@@ -135,10 +158,6 @@ class Resolver : public Singleton<Resolver>
    public:
     SocketDevice();
     ~SocketDevice();
-
-   protected:
-    void write_to_fd(int fd) override;    // Write thread.
-    void read_from_fd(int fd) override;   // Read thread.
   };
 
   struct HostnameCacheEntry;
@@ -202,7 +221,7 @@ class Resolver : public Singleton<Resolver>
     }
   };
 
-  using servicekey_to_port_cache_type = google::dense_hash_map<Service, in_port_t, ServiceCacheHash, ServiceCacheEqualTo>;
+  using servicekey_to_port_cache_type = google::dense_hash_map<Service, uint16_t, ServiceCacheHash, ServiceCacheEqualTo>;
   using servicekey_to_port_cache_ts = aithreadsafe::Wrapper<servicekey_to_port_cache_type, aithreadsafe::policy::Primitive<std::mutex>>;
 
   servicekey_to_port_cache_ts m_servicekey_to_port_cache;               // Cache for storing service/protocol to port number map.
@@ -217,7 +236,7 @@ class Resolver : public Singleton<Resolver>
 
   // Return the port number corresponding to the service name / protocol combination `key'.
   // This function is cached and thread-safe.
-  in_port_t port(Service const& key);
+  uint16_t port(Service const& key);
 
   //==========================================================================
   //
@@ -226,7 +245,7 @@ class Resolver : public Singleton<Resolver>
 
  private:
   // The timer used to time out queries from the DNS server.
-  statefultask::Timer m_timer;
+  threadpool::Timer m_timer;
 
   // Timer callback functions, called from libdns. If the timer times out between a call to dns_start_timer()
   // and dns_stop_timer() then we should call dns_timed_out().
@@ -357,7 +376,7 @@ class Resolver : public Singleton<Resolver>
   getnameinfo_memory_pool_ts m_getnameinfo_memory_pool;         // Memory pool for objects returned by queue_getnameinfo.
 
   friend task::GetAddrInfo;
-  std::shared_ptr<AddrInfoLookup> queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints);
+  std::shared_ptr<AddrInfoLookup> queue_getaddrinfo(std::string&& hostname, uint16_t port, AddressInfoHints const& hints);
 
  public:
   std::shared_ptr<NameInfoLookup> getnameinfo(evio::SocketAddress const& address);
@@ -367,7 +386,7 @@ class Resolver : public Singleton<Resolver>
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       std::shared_ptr<AddrInfoLookup>>::type
-  getaddrinfo(S1&& node, in_port_t port, AddressInfoHints const& hints = AddressInfoHints())
+  getaddrinfo(S1&& node, uint16_t port, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_getaddrinfo(std::forward<std::string>(node), port, hints);
   }

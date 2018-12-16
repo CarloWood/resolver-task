@@ -2,7 +2,7 @@
 
 #include "utils/macros.h"
 #include "debug.h"
-#include <netinet/in.h>         // Protocol numbers; in_port_t
+#include <netinet/in.h>         // Protocol numbers.
 #include <string_view>
 #include <array>
 #include <cstring>

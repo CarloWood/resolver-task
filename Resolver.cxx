@@ -35,8 +35,7 @@ namespace resolver {
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-Resolver::SocketDevice::SocketDevice() :
-  evio::InputDevice(nullptr), evio::OutputDevice(nullptr)       // SocketDevice doesn't use (our) buffers.
+Resolver::SocketDevice::SocketDevice()
 {
   DoutEntering(dc::notice, "Resolver::SocketDevice::SocketDevice()");
 }
@@ -119,7 +118,7 @@ void Resolver::SocketDevice::dns_closed_fd(void* user_data)
 {
   DoutEntering(dc::notice, "dns_closed_fd()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  RefCountReleaser releaser;
+  evio::RefCountReleaser releaser;
   // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
   releaser = self;
   releaser += self->close_input_device();
@@ -127,19 +126,21 @@ void Resolver::SocketDevice::dns_closed_fd(void* user_data)
   ASSERT(self->is_dead());
 }
 
-void Resolver::SocketDevice::write_to_fd(int DEBUG_ONLY(fd))
+void Resolver::SocketDevice::VT_impl::write_to_fd(OutputDevice* _self, int DEBUG_ONLY(fd))
 {
+  SocketDevice* self = static_cast<SocketDevice*>(_self);
   DoutEntering(dc::evio, "Resolver::SocketDevice::write_to_fd(" << fd << ")");
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
-  dns_so_is_writable(dns_resolver_w->get(), this);
+  dns_so_is_writable(dns_resolver_w->get(), self);
   dns_resolver_w->run_dns();
 }
 
-void Resolver::SocketDevice::read_from_fd(int DEBUG_ONLY(fd))
+void Resolver::SocketDevice::VT_impl::read_from_fd(InputDevice* _self, int DEBUG_ONLY(fd))
 {
+  SocketDevice* self = static_cast<SocketDevice*>(_self);
   DoutEntering(dc::evio, "Resolver::SocketDevice::read_from_fd(" << fd << ")");
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
-  dns_so_is_readable(dns_resolver_w->get(), this);
+  dns_so_is_readable(dns_resolver_w->get(), self);
   dns_resolver_w->run_dns();
 }
 
@@ -226,7 +227,7 @@ Resolver::~Resolver()
 void Resolver::dns_start_timer()
 {
   DoutEntering(dc::notice, "Resolver::dns_start_timer()");
-  instance().m_timer.start(statefultask::Interval<1, std::chrono::seconds>());
+  instance().m_timer.start(threadpool::Interval<1, std::chrono::seconds>());
 }
 
 //static
@@ -437,7 +438,7 @@ void Resolver::DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry>
     start_getnameinfo(new_cache_entry);
 }
 
-std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostname, in_port_t port, AddressInfoHints const& hints)
+std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostname, uint16_t port, AddressInfoHints const& hints)
 {
   DoutEntering(dc::notice, "Resolver::queue_getaddrinfo(\"" << hostname << "\", " << port << ", " << hints << ")");
 
@@ -597,9 +598,9 @@ in_proto_t Resolver::protocol(char const* protocol_str)
   return protocol;
 }
 
-in_port_t Resolver::port(Service const& key)
+uint16_t Resolver::port(Service const& key)
 {
-  in_port_t port;
+  uint16_t port;
   bool found;
   {
     servicekey_to_port_cache_ts::rat servicekey_to_port_cache_r(m_servicekey_to_port_cache);

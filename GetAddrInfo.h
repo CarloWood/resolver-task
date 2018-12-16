@@ -127,7 +127,7 @@ class GetAddrInfo : public AIStatefulTask
   typename std::enable_if<
       std::is_same<S1, std::string>::value || std::is_convertible<S1, std::string>::value,
       void>::type
-  init(S1&& node, in_port_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
+  init(S1&& node, uint16_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
     m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node), port, hints);
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
