@@ -135,14 +135,22 @@ class Resolver : public Singleton<Resolver>
       static void read_from_fd(InputDevice* _self, int fd);
 
       static constexpr VT_type VT{
-        read_from_fd,
-        read_returned_zero,
-        read_error,
-        data_received,
-        write_to_fd,
-        write_error
+        /*SocketDevice*/
+          /*InputDevice*/
+          nullptr,
+          read_from_fd,
+          read_returned_zero,
+          read_error,
+          data_received,
+          /*OutputDevice*/
+          nullptr,
+          write_to_fd,
+          write_error
       };
     };
+
+    // Make a deep copy of VT_ptr.
+    VT_type* clone_VT() override { return VT_ptr.clone(this); }
 
     utils::VTPtr<SocketDevice, evio::InputDevice, evio::OutputDevice> VT_ptr;
 

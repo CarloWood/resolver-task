@@ -28,6 +28,7 @@
 #include "threadsafe/aithreadsafe.h"
 #include "utils/NodeMemoryPool.h"
 #include "utils/AIAlert.h"
+#include "evio/StreamBuf-threads.h"
 #include <arpa/inet.h>
 #include <cstring>
 
@@ -35,7 +36,7 @@ namespace resolver {
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-Resolver::SocketDevice::SocketDevice()
+Resolver::SocketDevice::SocketDevice() : VT_ptr(this)
 {
   DoutEntering(dc::notice, "Resolver::SocketDevice::SocketDevice()");
 }
@@ -86,7 +87,9 @@ void Resolver::SocketDevice::dns_start_output_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_output_device()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  self->start_output_device();
+  // This callback function is called from libev, hence it is single threaded.
+  evio::SingleThread type;
+  self->start_output_device(type);
 }
 
 //static
@@ -94,7 +97,9 @@ void Resolver::SocketDevice::dns_start_input_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_input_device()");
   SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  self->start_input_device();
+  // This callback function is called from libev, hence it is single threaded.
+  evio::SingleThread type;
+  self->start_input_device(type);
 }
 
 //static
