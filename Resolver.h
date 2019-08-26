@@ -31,6 +31,7 @@
 #include "farmhash/src/farmhash.h"
 #include "threadpool/Timer.h"
 #include "events/Events.h"
+#include "threadpool/AIQueueHandle.h"
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
 #include <memory>
@@ -121,39 +122,8 @@ class Resolver : public Singleton<Resolver>
 
  private:
   // A socket used to connect to a DNS server (udp and/or tcp).
-  class SocketDevice : public evio::InputDevice, public evio::OutputDevice
+  class DNSSocket : public evio::InputDevice, public evio::OutputDevice
   {
-   public:
-    struct VT_type : evio::InputDevice::VT_type, evio::OutputDevice::VT_type
-    {
-    };
-
-    struct VT_impl : evio::InputDevice::VT_impl, evio::OutputDevice::VT_impl
-    {
-      // Override
-      static void write_to_fd(OutputDevice* _self, int fd);
-      static void read_from_fd(InputDevice* _self, int fd);
-
-      static constexpr VT_type VT{
-        /*SocketDevice*/
-          /*InputDevice*/
-          nullptr,
-          read_from_fd,
-          read_returned_zero,
-          read_error,
-          data_received,
-          /*OutputDevice*/
-          nullptr,
-          write_to_fd,
-          write_error
-      };
-    };
-
-    // Make a deep copy of VT_ptr.
-    VT_type* clone_VT() override { return VT_ptr.clone(this); }
-
-    utils::VTPtr<SocketDevice, evio::InputDevice, evio::OutputDevice> VT_ptr;
-
    private:
     friend Resolver;
     static void* dns_created_socket(int fd);
@@ -164,8 +134,12 @@ class Resolver : public Singleton<Resolver>
     static void dns_closed_fd(void* user_data);
 
    public:
-    SocketDevice();
-    ~SocketDevice();
+    DNSSocket();
+    ~DNSSocket();
+
+   protected:
+     void write_to_fd(int& allow_deletion_count, int fd) override;
+     void read_from_fd(int& allow_deletion_count, int fd) override;
   };
 
   struct HostnameCacheEntry;
@@ -199,7 +173,7 @@ class Resolver : public Singleton<Resolver>
   using dns_resolver_ts = aithreadsafe::Wrapper<DnsResolver, aithreadsafe::policy::Primitive<std::mutex>>;
   dns_resolver_ts m_dns_resolver;
 
-  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<SocketDevice>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DNSSocket>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
   socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
 
   AIQueueHandle m_handler;

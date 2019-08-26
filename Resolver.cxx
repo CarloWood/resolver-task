@@ -36,35 +36,35 @@ namespace resolver {
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-Resolver::SocketDevice::SocketDevice() : VT_ptr(this)
+Resolver::DNSSocket::DNSSocket()
 {
-  DoutEntering(dc::notice, "Resolver::SocketDevice::SocketDevice()");
+  DoutEntering(dc::notice, "Resolver::DNSSocket::DNSSocket()");
 }
 
-Resolver::SocketDevice::~SocketDevice()
+Resolver::DNSSocket::~DNSSocket()
 {
-  DoutEntering(dc::notice, "Resolver::SocketDevice::~SocketDevice()");
+  DoutEntering(dc::notice, "Resolver::DNSSocket::~DNSSocket()");
 }
 
 //static
-void* Resolver::SocketDevice::dns_created_socket(int fd)
+void* Resolver::DNSSocket::dns_created_socket(int fd)
 {
-  DoutEntering(dc::notice, "SocketDevice::dns_created_socket(" << fd << ")");
-  SocketDevice* resolver_device = new SocketDevice();
+  DoutEntering(dc::notice, "DNSSocket::dns_created_socket(" << fd << ")");
+  DNSSocket* resolver_device = new DNSSocket();
   resolver_device->init(fd);
-  resolver_device->m_flags |= INTERNAL_FDS_DONT_CLOSE; // Let the closing be done by libdns.
-  // Increment ref count to stop this SocketDevice from being deleted while being used by libdns.
+  state_t::wat(resolver_device->m_state)->m_flags.set_dont_close(); // Let the closing be done by libdns.
+  // Increment ref count to stop this DNSSocket from being deleted while being used by libdns.
   socket_devices_ts::wat socket_devices_w(Resolver::instance().m_socket_devices);
   for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
   {
-    boost::intrusive_ptr<SocketDevice>& device_ptr(socket_devices_w->operator[](d));
+    boost::intrusive_ptr<DNSSocket>& device_ptr(socket_devices_w->operator[](d));
     if (!device_ptr)
     {
       device_ptr = resolver_device;
       return resolver_device;
     }
   }
-  DoutFatal(dc::core, "Resolver::SocketDevice::dns_created_socket: creating more than 2 sockets?!");
+  DoutFatal(dc::core, "Resolver::DNSSocket::dns_created_socket: creating more than 2 sockets?!");
 }
 
 void Resolver::close()
@@ -73,7 +73,7 @@ void Resolver::close()
   socket_devices_ts::wat socket_devices_w(m_socket_devices);
   for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
   {
-    boost::intrusive_ptr<SocketDevice>& device_ptr(socket_devices_w->operator[](d));
+    boost::intrusive_ptr<DNSSocket>& device_ptr(socket_devices_w->operator[](d));
     if (device_ptr)
     {
       device_ptr->close_input_device();
@@ -83,69 +83,59 @@ void Resolver::close()
 }
 
 //static
-void Resolver::SocketDevice::dns_start_output_device(void* user_data)
+void Resolver::DNSSocket::dns_start_output_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_output_device()");
-  SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  // This callback function is called from libev, hence it is single threaded.
-  evio::SingleThread type;
-  self->start_output_device(type);
+  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  self->start_output_device();
 }
 
 //static
-void Resolver::SocketDevice::dns_start_input_device(void* user_data)
+void Resolver::DNSSocket::dns_start_input_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_input_device()");
-  SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  // This callback function is called from libev, hence it is single threaded.
-  evio::SingleThread type;
-  self->start_input_device(type);
+  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  self->start_input_device();
 }
 
 //static
-void Resolver::SocketDevice::dns_stop_output_device(void* user_data)
+void Resolver::DNSSocket::dns_stop_output_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_stop_output_device()");
-  SocketDevice* self = static_cast<SocketDevice*>(user_data);
+  DNSSocket* self = static_cast<DNSSocket*>(user_data);
   self->stop_output_device();
 }
 
 //static
-void Resolver::SocketDevice::dns_stop_input_device(void* user_data)
+void Resolver::DNSSocket::dns_stop_input_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_stop_input_device()");
-  SocketDevice* self = static_cast<SocketDevice*>(user_data);
+  DNSSocket* self = static_cast<DNSSocket*>(user_data);
   self->stop_input_device();
 }
 
 //static
-void Resolver::SocketDevice::dns_closed_fd(void* user_data)
+void Resolver::DNSSocket::dns_closed_fd(void* user_data)
 {
   DoutEntering(dc::notice, "dns_closed_fd()");
-  SocketDevice* self = static_cast<SocketDevice*>(user_data);
-  evio::RefCountReleaser releaser;
+  DNSSocket* self = static_cast<DNSSocket*>(user_data);
   // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
-  releaser = self;
-  releaser += self->close_input_device();
-  releaser += self->close_output_device();
-  ASSERT(self->is_dead());
+  self->close();
 }
 
-void Resolver::SocketDevice::VT_impl::write_to_fd(OutputDevice* _self, int DEBUG_ONLY(fd))
+void Resolver::DNSSocket::write_to_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
 {
-  SocketDevice* self = static_cast<SocketDevice*>(_self);
-  DoutEntering(dc::evio, "Resolver::SocketDevice::write_to_fd(" << fd << ")");
+  DoutEntering(dc::io, "Resolver::DNSSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
-  dns_so_is_writable(dns_resolver_w->get(), self);
+  dns_so_is_writable(dns_resolver_w->get(), this);
   dns_resolver_w->run_dns();
 }
 
-void Resolver::SocketDevice::VT_impl::read_from_fd(InputDevice* _self, int DEBUG_ONLY(fd))
+void Resolver::DNSSocket::read_from_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
 {
-  SocketDevice* self = static_cast<SocketDevice*>(_self);
-  DoutEntering(dc::evio, "Resolver::SocketDevice::read_from_fd(" << fd << ")");
+  DoutEntering(dc::io, "Resolver::DNSSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
-  dns_so_is_readable(dns_resolver_w->get(), self);
+  dns_so_is_readable(dns_resolver_w->get(), this);
   dns_resolver_w->run_dns();
 }
 
@@ -194,14 +184,14 @@ void Resolver::init(AIQueueHandle handler, bool recurse)
 
     // Set callback functions; this calls dns_created_socket for the already created UDP socket before it returns.
     dns_set_so_hooks(resolver,
-        &SocketDevice::dns_created_socket,
-        &SocketDevice::dns_start_output_device,
-        &SocketDevice::dns_start_input_device,
-        &SocketDevice::dns_stop_output_device,
-        &SocketDevice::dns_stop_input_device,
+        &DNSSocket::dns_created_socket,
+        &DNSSocket::dns_start_output_device,
+        &DNSSocket::dns_start_input_device,
+        &DNSSocket::dns_stop_output_device,
+        &DNSSocket::dns_stop_input_device,
         &Resolver::dns_start_timer,
         &Resolver::dns_stop_timer,
-        &SocketDevice::dns_closed_fd);
+        &DNSSocket::dns_closed_fd);
     // Store the resolver pointer with mutex protection.
     dns_resolver_w->set(resolver);
   }
