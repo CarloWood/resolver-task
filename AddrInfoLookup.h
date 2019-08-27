@@ -79,7 +79,7 @@ class AddrInfoLookup
     return dns_strerror(m_hostname_cache->error);
   }
 
-  // Return the hostname that is the lookup for.
+  // Return the hostname that this is the lookup for.
   std::string const& hostname() const { return m_hostname_cache->str; }
 
   // Set some custom error.

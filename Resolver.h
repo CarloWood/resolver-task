@@ -159,7 +159,7 @@ class Resolver : public Singleton<Resolver>
     std::shared_ptr<AddressCacheEntry> m_current_nameinfo_lookup;
    public:
     DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr), m_running(false) { }
-    ~DnsResolver() noexcept { } // Without this I get a silly compiler warning about failing to inline the destructor.
+    ~DnsResolver() { } // Without this I get a silly compiler warning about failing to inline the destructor.
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
     void start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);

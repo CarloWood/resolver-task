@@ -76,7 +76,7 @@ void Resolver::close()
     boost::intrusive_ptr<DNSSocket>& device_ptr(socket_devices_w->operator[](d));
     if (device_ptr)
     {
-      device_ptr->close_input_device();
+      device_ptr->close();
       device_ptr.reset();
     }
   }
@@ -208,12 +208,14 @@ void Resolver::init(AIQueueHandle handler, bool recurse)
 
 Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_address_cache(128), m_getaddrinfo_memory_pool(32), m_getnameinfo_memory_pool(32)
 {
+  DoutEntering(dc::notice, "Resolver::Resolver()");
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
 }
 
 Resolver::~Resolver()
 {
+  DoutEntering(dc::notice, "Resolver::~Resolver()");
   // It is OK to call this with a nullptr.
   dns_res_close(dns_resolver_ts::wat(m_dns_resolver)->get());
 }
