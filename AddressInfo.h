@@ -116,7 +116,7 @@ class AddressInfoList : public AddressInfo
   // ai_addr and ai_cannonname must be either nullptr or point inside the SAME allocation
   // (so that a single std::free(addrinfo) is enough to free all of it.
   // This demands holds recursively for a non-null ai_next pointer.
-  // This function should really only be used by Resolver::DnsResolver::run_dns().
+  // This function should really only be used by DnsResolver::LibdnsWrapper::run_dns().
   void add(struct addrinfo* addrinfo);
 };
 

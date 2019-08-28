@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implementation of Resolver.
+ * @brief Implementation of DnsResolver.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -36,111 +36,116 @@ namespace resolver {
 
 unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
 
-Resolver::DNSSocket::DNSSocket()
+DnsResolver::DnsSocket::DnsSocket()
 {
-  DoutEntering(dc::notice, "Resolver::DNSSocket::DNSSocket()");
+  DoutEntering(dc::notice, "DnsSocket::DnsSocket()");
 }
 
-Resolver::DNSSocket::~DNSSocket()
+DnsResolver::DnsSocket::~DnsSocket()
 {
-  DoutEntering(dc::notice, "Resolver::DNSSocket::~DNSSocket()");
+  DoutEntering(dc::notice, "DnsSocket::~DnsSocket()");
 }
 
 //static
-void* Resolver::DNSSocket::dns_created_socket(int fd)
+void* DnsResolver::DnsSocket::dns_created_socket(int fd)
 {
-  DoutEntering(dc::notice, "DNSSocket::dns_created_socket(" << fd << ")");
-  DNSSocket* resolver_device = new DNSSocket();
+  DoutEntering(dc::notice, "DnsSocket::dns_created_socket(" << fd << ")");
+  DnsSocket* resolver_device = new DnsSocket();
   resolver_device->init(fd);
   state_t::wat(resolver_device->m_state)->m_flags.set_dont_close(); // Let the closing be done by libdns.
-  // Increment ref count to stop this DNSSocket from being deleted while being used by libdns.
-  socket_devices_ts::wat socket_devices_w(Resolver::instance().m_socket_devices);
-  for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
-  {
-    boost::intrusive_ptr<DNSSocket>& device_ptr(socket_devices_w->operator[](d));
-    if (!device_ptr)
-    {
-      device_ptr = resolver_device;
-      return resolver_device;
-    }
-  }
-  DoutFatal(dc::core, "Resolver::DNSSocket::dns_created_socket: creating more than 2 sockets?!");
+  DnsResolver::instance().add(resolver_device);
+  return resolver_device;
 }
 
-void Resolver::close()
+void DnsResolver::add(DnsSocket* dns_socket)
 {
-  DoutEntering(dc::notice, "Resolver::close()");
+  // Increment ref count to stop this DnsSocket from being deleted while being used by libdns.
   socket_devices_ts::wat socket_devices_w(m_socket_devices);
   for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
   {
-    boost::intrusive_ptr<DNSSocket>& device_ptr(socket_devices_w->operator[](d));
-    if (device_ptr)
+    boost::intrusive_ptr<DnsSocket>& device_ptr(socket_devices_w->operator[](d));
+    if (!device_ptr)
     {
-      device_ptr->close();
-      device_ptr.reset();
+      device_ptr = dns_socket;
+      return;
     }
+  }
+  DoutFatal(dc::core, "DnsSocket::dns_created_socket: creating more than 2 sockets?!");
+}
+
+void DnsResolver::release(DnsSocket* dns_socket)
+{
+  DoutEntering(dc::notice, "DnsResolver::release(" << dns_socket << ")");
+  DnsResolver::socket_devices_ts::wat socket_devices_w(m_socket_devices);
+  for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
+  {
+    boost::intrusive_ptr<DnsSocket>& device_ptr(socket_devices_w->operator[](d));
+    if (device_ptr.get() == dns_socket)
+      device_ptr.reset();
   }
 }
 
 //static
-void Resolver::DNSSocket::dns_start_output_device(void* user_data)
+void DnsResolver::DnsSocket::dns_start_output_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_output_device()");
-  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  DnsSocket* self = static_cast<DnsSocket*>(user_data);
   self->start_output_device();
 }
 
 //static
-void Resolver::DNSSocket::dns_start_input_device(void* user_data)
+void DnsResolver::DnsSocket::dns_start_input_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_start_input_device()");
-  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  DnsSocket* self = static_cast<DnsSocket*>(user_data);
   self->start_input_device();
 }
 
 //static
-void Resolver::DNSSocket::dns_stop_output_device(void* user_data)
+void DnsResolver::DnsSocket::dns_stop_output_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_stop_output_device()");
-  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  DnsSocket* self = static_cast<DnsSocket*>(user_data);
   self->stop_output_device();
 }
 
 //static
-void Resolver::DNSSocket::dns_stop_input_device(void* user_data)
+void DnsResolver::DnsSocket::dns_stop_input_device(void* user_data)
 {
   DoutEntering(dc::notice, "dns_stop_input_device()");
-  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  DnsSocket* self = static_cast<DnsSocket*>(user_data);
   self->stop_input_device();
 }
 
 //static
-void Resolver::DNSSocket::dns_closed_fd(void* user_data)
+void DnsResolver::DnsSocket::dns_closed_fd(void* user_data)
 {
-  DoutEntering(dc::notice, "dns_closed_fd()");
-  DNSSocket* self = static_cast<DNSSocket*>(user_data);
+  DnsSocket* self = static_cast<DnsSocket*>(user_data);
+  DoutEntering(dc::notice, "dns_closed_fd(" << self << ")");
   // Decrement ref count again (after incrementing it in dns_created_socket) now that libdns is done with it.
-  self->close();
+  DnsResolver::instance().release(self);
 }
 
-void Resolver::DNSSocket::write_to_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
+void DnsResolver::DnsSocket::write_to_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
 {
-  DoutEntering(dc::io, "Resolver::DNSSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
-  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
+  DoutEntering(dc::io, "DnsSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
+  DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
   dns_so_is_writable(dns_resolver_w->get(), this);
   dns_resolver_w->run_dns();
 }
 
-void Resolver::DNSSocket::read_from_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
+void DnsResolver::DnsSocket::read_from_fd(int& allow_deletion_count, int DEBUG_ONLY(fd))
 {
-  DoutEntering(dc::io, "Resolver::DNSSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
-  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
+  DoutEntering(dc::io, "DnsSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
+  DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
   dns_so_is_readable(dns_resolver_w->get(), this);
   dns_resolver_w->run_dns();
 }
 
-void Resolver::init(AIQueueHandle handler, bool recurse)
+void DnsResolver::init(AIQueueHandle handler, bool recurse)
 {
+  DoutEntering(dc::notice, "DnsResolver::init(" << handler << ", " << recurse << ")");
+
   // Just remember some non-immediate handler for use by GetAddrInfo and GetNameInfo tasks.
   m_handler = handler;
 
@@ -151,7 +156,7 @@ void Resolver::init(AIQueueHandle handler, bool recurse)
   struct dns_hosts* hosts = nullptr;
   struct dns_hints* hints = nullptr;
 
-  dns_resolver_ts::wat dns_resolver_w(Resolver::instance().m_dns_resolver);
+  dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
 
   do    // So we can use break (error).
   {
@@ -184,14 +189,14 @@ void Resolver::init(AIQueueHandle handler, bool recurse)
 
     // Set callback functions; this calls dns_created_socket for the already created UDP socket before it returns.
     dns_set_so_hooks(resolver,
-        &DNSSocket::dns_created_socket,
-        &DNSSocket::dns_start_output_device,
-        &DNSSocket::dns_start_input_device,
-        &DNSSocket::dns_stop_output_device,
-        &DNSSocket::dns_stop_input_device,
-        &Resolver::dns_start_timer,
-        &Resolver::dns_stop_timer,
-        &DNSSocket::dns_closed_fd);
+        &DnsSocket::dns_created_socket,
+        &DnsSocket::dns_start_output_device,
+        &DnsSocket::dns_start_input_device,
+        &DnsSocket::dns_stop_output_device,
+        &DnsSocket::dns_stop_input_device,
+        &DnsResolver::dns_start_timer,
+        &DnsResolver::dns_stop_timer,
+        &DnsSocket::dns_closed_fd);
     // Store the resolver pointer with mutex protection.
     dns_resolver_w->set(resolver);
   }
@@ -206,51 +211,69 @@ void Resolver::init(AIQueueHandle handler, bool recurse)
   }
 }
 
-Resolver::Resolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_address_cache(128), m_getaddrinfo_memory_pool(32), m_getnameinfo_memory_pool(32)
+void DnsResolver::deinit()
 {
-  DoutEntering(dc::notice, "Resolver::Resolver()");
+  DoutEntering(dc::notice, "DnsResolver::deinit()");
+  {
+    DnsResolver::socket_devices_ts::wat socket_devices_w(m_socket_devices);
+    for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
+    {
+      boost::intrusive_ptr<DnsSocket>& device_ptr(socket_devices_w->operator[](d));
+      if (device_ptr)
+        device_ptr->close();
+    }
+  }
+  dns_resolver_ts::wat(m_dns_resolver)->close();
+}
+
+DnsResolver::DnsResolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_address_cache(128), m_getaddrinfo_memory_pool(32), m_getnameinfo_memory_pool(32)
+{
+  DoutEntering(dc::notice, "DnsResolver::DnsResolver()");
   Service const impossible_key("..", 244);      // Protocol 244 doesn't exist, nor does a service named "..".
   servicekey_to_port_cache_ts::wat(m_servicekey_to_port_cache)->set_empty_key(impossible_key);
 }
 
-Resolver::~Resolver()
+DnsResolver::~DnsResolver()
 {
-  DoutEntering(dc::notice, "Resolver::~Resolver()");
-  // It is OK to call this with a nullptr.
-  dns_res_close(dns_resolver_ts::wat(m_dns_resolver)->get());
+  DoutEntering(dc::notice, "DnsResolver::~DnsResolver()");
+  dns_resolver_ts::wat dns_resolver_w(m_dns_resolver);
+  // Call DnsResolver::instance().close(); before leaving the scope of EventLoop.
+  ASSERT(!dns_resolver_w->get());
+  // Normally this shouldn't do anything, because it is already done by DnsResolver::instance().close().
+  dns_resolver_w->close();
 }
 
 //static
-void Resolver::dns_start_timer()
+void DnsResolver::dns_start_timer()
 {
-  DoutEntering(dc::notice, "Resolver::dns_start_timer()");
+  DoutEntering(dc::notice, "DnsResolver::dns_start_timer()");
   instance().m_timer.start(threadpool::Interval<1, std::chrono::seconds>());
 }
 
 //static
-void Resolver::dns_stop_timer()
+void DnsResolver::dns_stop_timer()
 {
-  DoutEntering(dc::notice, "Resolver::dns_stop_timer()");
+  DoutEntering(dc::notice, "DnsResolver::dns_stop_timer()");
   instance().m_timer.stop();
 }
 
 //static
-void Resolver::timed_out()
+void DnsResolver::timed_out()
 {
-  DoutEntering(dc::notice, "Resolver::timed_out()");
+  DoutEntering(dc::notice, "DnsResolver::timed_out()");
   dns_resolver_ts::wat dns_resolver_w(instance().m_dns_resolver);
   dns_timed_out(dns_resolver_w->get());
   dns_resolver_w->run_dns();
 }
 
-void Resolver::DnsResolver::run_dns()
+void DnsResolver::LibdnsWrapper::run_dns()
 {
   int error;
 
   if (!m_running)
   {
     // This is a serious error; but I'm not really sure how or if it could happen even if the code is bug free.
-    Dout(dc::warning, "Calling Resolver::DnsResolver::run_dns() while not running?!");
+    Dout(dc::warning, "Calling LibdnsWrapper::run_dns() while not running?!");
     return;
   }
 
@@ -277,6 +300,7 @@ void Resolver::DnsResolver::run_dns()
     Dout(dc::notice, "Calling set_ready()");
     m_current_addrinfo_lookup->set_ready();
 
+    dns_ai_close(m_dns_addrinfo);
     m_dns_addrinfo = nullptr;
   }
   else                  // We're doing a getnameinfo lookup.
@@ -359,8 +383,8 @@ void Resolver::DnsResolver::run_dns()
     m_current_nameinfo_lookup->set_ready();
   }
 
-  // At this point the DnsResolver is no longer busy, provided this
-  // is only checked while holding a lock on Resolver::m_dns_resolver.
+  // At this point the LibdnsWrapper is no longer busy, provided this
+  // is only checked while holding a lock on DnsResolver::m_dns_resolver.
   m_running = false;
 
   // FIXME: make this one queue? So that things get processed in order...
@@ -378,17 +402,25 @@ void Resolver::DnsResolver::run_dns()
   }
 }
 
-void Resolver::HostnameCacheEntry::set_error_empty()
+void DnsResolver::LibdnsWrapper::close()
+{
+  dns_res_close(m_dns_resolver);
+  m_dns_resolver = nullptr;
+  dns_ai_close(m_dns_addrinfo);
+  m_dns_addrinfo = nullptr;
+}
+
+void DnsResolver::HostnameCacheEntry::set_error_empty()
 {
   // Don't overwrite a real error.
   ASSERT(error == 0);
   error = DNS_EEMPTY;
 }
 
-void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+void DnsResolver::LibdnsWrapper::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   m_current_addrinfo_lookup = new_cache_entry;
-  // Call Resolver.instance().init(false) at the start of main() to initialize the resolver.
+  // Call DnsResolver.instance().init(false) at the start of main() to initialize the resolver.
   ASSERT(m_dns_resolver);
   int error = 0;        // Must be set to 0.
   struct dns_addrinfo* addrinfo = dns_ai_open(m_current_addrinfo_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
@@ -402,10 +434,10 @@ void Resolver::DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry
   run_dns();
 }
 
-void Resolver::DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+void DnsResolver::LibdnsWrapper::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
 {
   m_current_nameinfo_lookup = new_cache_entry;
-  // Call Resolver.instance().init() at the start of main() to initialize the resolver.
+  // Call DnsResolver.instance().init() at the start of main() to initialize the resolver.
   ASSERT(m_dns_resolver);
   int error = dns_res_submit(m_dns_resolver, new_cache_entry->arpa_str.c_str(), DNS_T_PTR, DNS_C_IN);
   if (error)
@@ -417,7 +449,7 @@ void Resolver::DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry>
   run_dns();
 }
 
-void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+void DnsResolver::LibdnsWrapper::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 {
   // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
   if (m_running)
@@ -426,7 +458,7 @@ void Resolver::DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry
     start_getaddrinfo(new_cache_entry, hints);
 }
 
-void Resolver::DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+void DnsResolver::LibdnsWrapper::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
 {
   // Check if the dns lib is busy with another lookup (yeah, it doesn't support doing lookups in parallel).
   if (m_running)
@@ -435,9 +467,9 @@ void Resolver::DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry>
     start_getnameinfo(new_cache_entry);
 }
 
-std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostname, uint16_t port, AddressInfoHints const& hints)
+std::shared_ptr<AddrInfoLookup> DnsResolver::queue_getaddrinfo(std::string&& hostname, uint16_t port, AddressInfoHints const& hints)
 {
-  DoutEntering(dc::notice, "Resolver::queue_getaddrinfo(\"" << hostname << "\", " << port << ", " << hints << ")");
+  DoutEntering(dc::notice, "DnsResolver::queue_getaddrinfo(\"" << hostname << "\", " << port << ", " << hints << ")");
 
   bool new_cache_entry;
   std::shared_ptr<HostnameCacheEntry> const* new_cache_entry_ptr;
@@ -458,9 +490,9 @@ std::shared_ptr<AddrInfoLookup> Resolver::queue_getaddrinfo(std::string&& hostna
       utils::NodeMemoryPool>(*getaddrinfo_memory_pool_ts::wat(m_getaddrinfo_memory_pool)), *new_cache_entry_ptr, port);
 }
 
-std::shared_ptr<NameInfoLookup> Resolver::getnameinfo(evio::SocketAddress const& address)
+std::shared_ptr<NameInfoLookup> DnsResolver::getnameinfo(evio::SocketAddress const& address)
 {
-  DoutEntering(dc::notice, "Resolver::getnameinfo(" << address << ")");
+  DoutEntering(dc::notice, "DnsResolver::getnameinfo(" << address << ")");
 
   bool new_cache_entry;
   std::shared_ptr<AddressCacheEntry> const* new_cache_entry_ptr;
@@ -486,7 +518,7 @@ std::shared_ptr<NameInfoLookup> Resolver::getnameinfo(evio::SocketAddress const&
 // Return the official protocol name of `protocol'.
 // If protocol == 0, returns nullptr; otherwise if protocol doesn't exist, returns "unknown".
 //static
-char const* Resolver::protocol_str(in_proto_t protocol)
+char const* DnsResolver::protocol_str(in_proto_t protocol)
 {
   // A simple map from protocol numbers to protocol strings.
   using protocol_names_type = aithreadsafe::Wrapper<std::array<char const*, IPPROTO_MAX>, aithreadsafe::policy::Primitive<std::mutex>>;
@@ -546,7 +578,7 @@ char const* Resolver::protocol_str(in_proto_t protocol)
 // Return protocol number of `protocol_str'.
 // If protocol_str is nullptr then returns 0.
 //static
-in_proto_t Resolver::protocol(char const* protocol_str)
+in_proto_t DnsResolver::protocol(char const* protocol_str)
 {
   // Let nullptr mean 'any protocol'.
   if (protocol_str == nullptr)
@@ -595,7 +627,7 @@ in_proto_t Resolver::protocol(char const* protocol_str)
   return protocol;
 }
 
-uint16_t Resolver::port(Service const& key)
+uint16_t DnsResolver::port(Service const& key)
 {
   uint16_t port;
   bool found;
@@ -647,5 +679,5 @@ uint16_t Resolver::port(Service const& key)
 } // namespace resolver
 
 namespace {
-SingletonInstance<resolver::Resolver> dummy __attribute__ ((__unused__));
+SingletonInstance<resolver::DnsResolver> dummy __attribute__ ((__unused__));
 } // namespace

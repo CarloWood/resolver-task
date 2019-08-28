@@ -86,7 +86,7 @@ class GetNameInfo : public AIStatefulTask
 
  private:
   std::shared_ptr<resolver::NameInfoLookup> m_result;
-  events::RequestHandle<resolver::Resolver::AddressCacheEntryReadyEvent> m_handle;
+  events::RequestHandle<resolver::DnsResolver::AddressCacheEntryReadyEvent> m_handle;
   events::BusyInterface m_busy_interface;
 
  public:
@@ -103,7 +103,7 @@ class GetNameInfo : public AIStatefulTask
    */
   void init(evio::SocketAddress const& socket_address)
   {
-    m_result = resolver::Resolver::instance().getnameinfo(socket_address);
+    m_result = resolver::DnsResolver::instance().getnameinfo(socket_address);
     m_handle = m_result->event_server().request(*this, &GetNameInfo::done, m_busy_interface);
   }
 
@@ -148,8 +148,8 @@ class GetNameInfo : public AIStatefulTask
   void multiplex_impl(state_type run_state) override;
 
  private:
-  // This is the callback for resolver::Resolver::AddressCacheEntry::ready_event.
-  void done(resolver::Resolver::AddressCacheEntryReadyEvent const&);
+  // This is the callback for resolver::DnsResolver::AddressCacheEntry::ready_event.
+  void done(resolver::DnsResolver::AddressCacheEntryReadyEvent const&);
 };
 
 } // namespace task

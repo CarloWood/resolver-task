@@ -11,8 +11,8 @@ SOURCES = \
 	GetNameInfo.cxx \
 	GetNameInfoLookup.h \
 	AddrInfoLookup.cxx \
-	Resolver.h \
-	Resolver.cxx \
+	DnsResolver.h \
+	DnsResolver.cxx \
 	AddrInfoLookup.h \
 	AddressInfo.h \
 	AddressInfo.cxx \

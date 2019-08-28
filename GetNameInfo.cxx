@@ -43,11 +43,11 @@ void GetNameInfo::initialize_impl()
   DoutEntering(dc::statefultask(mSMDebug), "GetNameInfo::initialize_impl() [" << (void*)this << "]");
   set_state(GetNameInfo_start);
   // This isn't going to work. Please call GetNameInfo::run() with a non-immediate handler,
-  // for example resolver::Resolver::instance().get_handler();
+  // for example resolver::DnsResolver::instance().get_handler();
   ASSERT(!default_is_immediate());
 }
 
-void GetNameInfo::done(resolver::Resolver::AddressCacheEntryReadyEvent const&)
+void GetNameInfo::done(resolver::DnsResolver::AddressCacheEntryReadyEvent const&)
 {
   signal(1);
 }

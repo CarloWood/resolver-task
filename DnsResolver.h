@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Singleton for DNS lookups. Declaration of class Resolver.
+ * @brief Singleton for DNS lookups. Declaration of class DnsResolver.
  *
  * @Copyright (C) 2018  Carlo Wood.
  *
@@ -55,65 +55,84 @@ namespace resolver {
 class AddressInfoHints;
 class AddrInfoLookup;
 class NameInfoLookup;
+class DnsResolver;
 
-// The Resolver must be initialized, at the start of main, after the IO event loop thread.
+// The DnsResolver must be initialized, at the start of main, after the IO event loop thread.
 // A typical way that main() could start is as follows:
 //
-// using resolver::Resolver;
-//
-// int main()
-// {
-//   Debug(NAMESPACE_DEBUG::init());
-//
-//   AIThreadPool thread_pool;
-//   AIQueueHandle handler = thread_pool.new_queue(queue_capacity);
-//   // Initialize the IO event loop thread.
-//   EventLoopThread::instance().init(handler);
-//   // Initialize the async hostname resolver.
-//   Resolver::instance().init(handler, recurse);        // recurse is a boolean (true or false).
-//
-//...
-//
-//   // Terminate application.
-//   Resolver::instance().close();
-//   EventLoopThread::instance().terminate();
-// }
+#ifdef EXAMPLE_CODE     // undefined
+int main()
+{
+  Debug(NAMESPACE_DEBUG::init());
+
+  AIThreadPool thread_pool;
+  AIQueueHandle handler = thread_pool.new_queue(queue_capacity);
+
+  try
+  {
+    // Initialize the IO event loop thread and the async hostname resolver.
+    evio::EventLoop event_loop(handler);
+    resolver::Scope resolver_scope(handler, recurse);   // recurse is a boolean (true or false).
+
+...
+
+    getaddrinfo_task = new task::GetAddrInfo(DEBUG_ONLY(true));
+    getaddrinfo_task->init("www.google.com", "www");
+
+// ... run getaddrinfo_task in an AIEngine.
+
+    // Terminate application.
+    event_loop.join();
+  }
+  catch (AIAlert::Error const& error)
+  {
+    Dout(dc::warning, error);
+  }
+
+ Dout(dc::notice, "Leaving main()...");
+}
+#endif // EXAMPLE_CODE
+// The resolver::Scope object makes sure that the UDP socket that is used for the DNS look ups
+// is cleanly closed and libdns is properly terminated upon leaving this scope.
+// It must be instantiated *after* event_loop for the correct order of deinitialization
+// (first the resolver teardown, then the event loop).
 //
 // Program flow for getaddrinfo is:
 // 1) task::GetAddrInfo::init(std::string&& node, char const* service OR uint16_t port, AddressInfoHints const& hints)
 //    Converts `service' to a port number if needed and then calls:
-// 2) Resolver::queue_getaddrinfo(std::string&& node, uint16_t port, AddressInfoHints const& hints)
+// 2) DnsResolver::queue_getaddrinfo(std::string&& node, uint16_t port, AddressInfoHints const& hints)
 //    Looks up and/or stores node in m_hostname_cache. Returns handle to cache entry.
 //    If a new cache entry had to be created, calls:
-// 3) DnsResolver::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+// 3) LibdnsWrapper::queue_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 //    If the resolver is already running, queues the new request. Otherwise calls:
-// 4) DnsResolver::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
+// 4) LibdnsWrapper::start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints)
 //    Calls dns_ai_open(), sets m_dns_addrinfo and m_running, and calls run_dns().
 //
-// Note that the class DnsResolver gives access to libdns which isn't threadsafe; therefore
-// all accesses to DnsResolver are protected by a mutex (through Resolver::m_dns_resolver).
+// Note that the class LibdnsWrapper gives access to libdns which isn't threadsafe; therefore
+// all accesses to LibdnsWrapper are protected by a mutex (through DnsResolver::m_dns_resolver).
 //
 // Program flow for getnameinfo is:
 // 1) task::GetNameInfo::init(SocketAddress const& sock_address)
-// 2) Resolver::queue_getnameinfo(SocketAddress const& sock_address)
-// 3) DnsResolver::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
-// 4) DnsResolver::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+// 2) DnsResolver::queue_getnameinfo(SocketAddress const& sock_address)
+// 3) LibdnsWrapper::queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
+// 4) LibdnsWrapper::start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry)
 //
-class Resolver : public Singleton<Resolver>
+class DnsResolver : public Singleton<DnsResolver>
 {
   //===========================================================================================================================================================
   //
-  // Resolver is a Singleton.
+  // DnsResolver is a Singleton.
   //
 
   friend_Instance;
  private:
-  Resolver();
-  ~Resolver();
-  Resolver(Resolver const&) = delete;
+  DnsResolver();
+  ~DnsResolver();
+  DnsResolver(DnsResolver const&) = delete;
 
  public:
   void init(AIQueueHandle handler, bool recurse);
+  void deinit();
 
   //===========================================================================================================================================================
   //
@@ -122,10 +141,10 @@ class Resolver : public Singleton<Resolver>
 
  private:
   // A socket used to connect to a DNS server (udp and/or tcp).
-  class DNSSocket : public evio::InputDevice, public evio::OutputDevice
+  class DnsSocket : public evio::InputDevice, public evio::OutputDevice
   {
    private:
-    friend Resolver;
+    friend class DnsResolver;
     static void* dns_created_socket(int fd);
     static void dns_start_output_device(void* user_data);
     static void dns_start_input_device(void* user_data);
@@ -134,8 +153,8 @@ class Resolver : public Singleton<Resolver>
     static void dns_closed_fd(void* user_data);
 
    public:
-    DNSSocket();
-    ~DNSSocket();
+    DnsSocket();
+    ~DnsSocket();
 
    protected:
      void write_to_fd(int& allow_deletion_count, int fd) override;
@@ -148,7 +167,7 @@ class Resolver : public Singleton<Resolver>
   // This is a trick; instead of wrapping the actual struct we wrap
   // the pointer to it. Of course this means we need to keep this
   // object locked while using the pointer.
-  class DnsResolver
+  class LibdnsWrapper
   {
     struct dns_resolver* m_dns_resolver;
     struct dns_addrinfo* m_dns_addrinfo;        // Has to be protected too because it contains a pointer to dns_resolver.
@@ -158,8 +177,8 @@ class Resolver : public Singleton<Resolver>
     std::shared_ptr<HostnameCacheEntry> m_current_addrinfo_lookup;
     std::shared_ptr<AddressCacheEntry> m_current_nameinfo_lookup;
    public:
-    DnsResolver() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr), m_running(false) { }
-    ~DnsResolver() { } // Without this I get a silly compiler warning about failing to inline the destructor.
+    LibdnsWrapper() : m_dns_resolver(nullptr), m_dns_addrinfo(nullptr), m_running(false) { }
+    ~LibdnsWrapper() { } // Without this I get a silly compiler warning about failing to inline the destructor.
     void set(dns_resolver* dns_resolver) { m_dns_resolver = dns_resolver; }
     struct dns_resolver* get() const { return m_dns_resolver; }
     void start_getaddrinfo(std::shared_ptr<HostnameCacheEntry> const& new_cache_entry, AddressInfoHints const& hints);
@@ -167,19 +186,22 @@ class Resolver : public Singleton<Resolver>
     void start_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry);
     void queue_getnameinfo(std::shared_ptr<AddressCacheEntry> const& new_cache_entry);
     void run_dns();     // Give CPU cycles to libdns.
+    void close();       // Destroy m_dns_resolver and m_dns_addrinfo and reset them to nullptr.
   };
 
+  void add(DnsSocket* dns_socket);
+  void release(DnsSocket* dns_socket);
+
+ private:
+  friend class DnsSocket;       // Needs access to m_dns_resolver.
   struct dns_resolv_conf* m_dns_resolv_conf;
-  using dns_resolver_ts = aithreadsafe::Wrapper<DnsResolver, aithreadsafe::policy::Primitive<std::mutex>>;
+  using dns_resolver_ts = aithreadsafe::Wrapper<LibdnsWrapper, aithreadsafe::policy::Primitive<std::mutex>>;
   dns_resolver_ts m_dns_resolver;
-
-  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DNSSocket>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DnsSocket>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
   socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
-
   AIQueueHandle m_handler;
 
  public:
-  void close();
   AIQueueHandle get_handler() const { return m_handler; }
 
   //===========================================================================================================================================================
@@ -380,6 +402,20 @@ class Resolver : public Singleton<Resolver>
   getaddrinfo(S1&& node, char const* service, AddressInfoHints const& hints = AddressInfoHints())
   {
     return queue_getaddrinfo(std::forward<std::string>(node), port(Service(service, hints.as_addrinfo()->ai_protocol)), hints);
+  }
+};
+
+class Scope
+{
+ public:
+  Scope(AIQueueHandle handler, bool recurse)
+  {
+    DnsResolver::instance().init(handler, recurse);   // recurse is a boolean (true or false).
+  }
+
+  ~Scope()
+  {
+    DnsResolver::instance().deinit();
   }
 };
 

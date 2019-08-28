@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "Resolver.h"
+#include "DnsResolver.h"
 
 extern "C" {
   const char* dns_strerror(int error);
@@ -34,7 +34,7 @@ namespace resolver {
 // Represents a running GetNameInfo lookup.
 class NameInfoLookup
 {
-  using AddressCacheEntry = Resolver::AddressCacheEntry;
+  using AddressCacheEntry = DnsResolver::AddressCacheEntry;
 
  private:
    std::shared_ptr<AddressCacheEntry> m_address_cache;

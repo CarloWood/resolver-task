@@ -49,18 +49,18 @@
  * task::GetAddrInfo* resolver = new task::GetAddrInfo;
  *
  * resolver->init("www.google.com", 80);        // As usual, this initializes the task before running it; don't call init() multiple times.
- * resolver->run(resolver::Resolver::instance().get_handler(), ...);    // Start hostname lookup and pass callback; see AIStatefulTask.
+ * resolver->run(resolver::DnsResolver::instance().get_handler(), ...);    // Start hostname lookup and pass callback; see AIStatefulTask.
  * @endcode
  *
  * If there is a good chance that the hostname was already resolved, one can try instead:
  *
  * @code
- * auto cached = resolver::Resolver::instance().getaddrinfo("www.google.com", 80);
+ * auto cached = resolver::DnsResolver::instance().getaddrinfo("www.google.com", 80);
  * if (!cached->is_ready())
  * {
  *   task::GetAddrInfo* resolver = new task::GetAddrInfo;
  *   resolver->init(cached);
- *   resolver->run(resolver::Resolver::instance().get_handler(), ...);
+ *   resolver->run(resolver::DnsResolver::instance().get_handler(), ...);
  * }
  * else if (cached->success())
  *   // Use cached->get_result()
@@ -72,7 +72,7 @@
  * It is allowed to call init() followed by run() from within the callback function
  * to start another look up though.
  *
- * It is perfectly OK to pass some other handler/engine to run() than Resolver::get_handler(),
+ * It is perfectly OK to pass some other handler/engine to run() than DnsResolver::get_handler(),
  * just as long as you pass something (not an immediate handler).
  *
  * In the callback / parent task use,
@@ -106,7 +106,7 @@ class GetAddrInfo : public AIStatefulTask
 
  private:
   std::shared_ptr<resolver::AddrInfoLookup> m_result;
-  events::RequestHandle<resolver::Resolver::HostnameCacheEntryReadyEvent> m_handle;
+  events::RequestHandle<resolver::DnsResolver::HostnameCacheEntryReadyEvent> m_handle;
   events::BusyInterface m_busy_interface;
 
  public:
@@ -129,7 +129,7 @@ class GetAddrInfo : public AIStatefulTask
       void>::type
   init(S1&& node, uint16_t port, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
-    m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node), port, hints);
+    m_result = resolver::DnsResolver::instance().queue_getaddrinfo(std::forward<std::string>(node), port, hints);
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
@@ -146,8 +146,8 @@ class GetAddrInfo : public AIStatefulTask
       void>::type
   init(S1&& node, char const* service, resolver::AddressInfoHints const& hints = resolver::AddressInfoHints())
   {
-    m_result = resolver::Resolver::instance().queue_getaddrinfo(std::forward<std::string>(node),
-        resolver::Resolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
+    m_result = resolver::DnsResolver::instance().queue_getaddrinfo(std::forward<std::string>(node),
+        resolver::DnsResolver::instance().port(resolver::Service(service, hints.as_addrinfo()->ai_protocol)), hints);
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
@@ -200,8 +200,8 @@ class GetAddrInfo : public AIStatefulTask
   void multiplex_impl(state_type run_state) override;
 
  private:
-  // This is the callback for resolver::Resolver::HostnameCacheEntry::ready_event.
-  void done(resolver::Resolver::HostnameCacheEntryReadyEvent const&);
+  // This is the callback for resolver::DnsResolver::HostnameCacheEntry::ready_event.
+  void done(resolver::DnsResolver::HostnameCacheEntryReadyEvent const&);
 };
 
 } // namespace task
