@@ -93,7 +93,7 @@ class GetNameInfo : public AIStatefulTask
   /*!
    * @brief Construct an GetNameInfo object.
    */
-  GetNameInfo(DEBUG_ONLY(bool debug = false)) DEBUG_ONLY(: AIStatefulTask(debug))
+  GetNameInfo(CWDEBUG_ONLY(bool debug = false)) CWDEBUG_ONLY(: AIStatefulTask(debug))
     { DoutEntering(dc::statefultask(mSMDebug), "GetNameInfo() [" << (void*)this << "]"); }
 
   /*!

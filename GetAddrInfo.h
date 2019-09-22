@@ -113,7 +113,7 @@ class GetAddrInfo : public AIStatefulTask
   /*!
    * @brief Construct an GetAddrInfo object.
    */
-  GetAddrInfo( DEBUG_ONLY(bool debug = false) ) DEBUG_ONLY(: AIStatefulTask(debug))
+  GetAddrInfo(CWDEBUG_ONLY(bool debug = false)) CWDEBUG_ONLY(: AIStatefulTask(debug))
     { DoutEntering(dc::statefultask(mSMDebug), "GetAddrInfo() [" << (void*)this << "]"); }
 
   /*!
