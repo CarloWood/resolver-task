@@ -126,7 +126,7 @@ void DnsResolver::DnsSocket::dns_closed_fd(void* user_data)
   DnsResolver::instance().release(self);
 }
 
-void DnsResolver::DnsSocket::write_to_fd(int& allow_deletion_count, int CWDEBUG_ONLY(fd))
+void DnsResolver::DnsSocket::write_to_fd(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::io, "DnsSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
@@ -134,7 +134,7 @@ void DnsResolver::DnsSocket::write_to_fd(int& allow_deletion_count, int CWDEBUG_
   dns_resolver_w->run_dns();
 }
 
-void DnsResolver::DnsSocket::read_from_fd(int& allow_deletion_count, int CWDEBUG_ONLY(fd))
+void DnsResolver::DnsSocket::read_from_fd(int& CWDEBUG_ONLY(allow_deletion_count), int CWDEBUG_ONLY(fd))
 {
   DoutEntering(dc::io, "DnsSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
