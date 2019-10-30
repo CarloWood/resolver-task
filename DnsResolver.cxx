@@ -34,8 +34,6 @@
 
 namespace resolver {
 
-unsigned int const buffer_max_packet_size = (dns_p_calcsize(512) + 63) & 63;    // Round up to multiple of 64 (640 bytes) for no reason.
-
 DnsResolver::DnsSocket::DnsSocket()
 {
   DoutEntering(dc::notice, "DnsSocket::DnsSocket()");
