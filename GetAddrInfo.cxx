@@ -73,7 +73,7 @@ void GetAddrInfo::multiplex_impl(state_type run_state)
         yield();
         break;
       }
-      /* FALL-THROUGH */
+      [[fallthrough]];
     case GetAddrInfo_done:
       finish();
       break;

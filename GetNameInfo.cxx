@@ -70,7 +70,7 @@ void GetNameInfo::multiplex_impl(state_type run_state)
         yield();
         break;
       }
-      /* FALL-THROUGH */
+      [[fallthrough]];
     case GetNameInfo_done:
       finish();
       break;
