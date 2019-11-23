@@ -75,14 +75,14 @@ class GetNameInfo : public AIStatefulTask
 
   //! The different states of the stateful task.
   enum resolver_state_type {
-    GetNameInfo_start = direct_base_type::max_state,
+    GetNameInfo_start = direct_base_type::state_end,
     GetNameInfo_ready,
     GetNameInfo_done
   };
 
  public:
   //! One beyond the largest state of this task.
-  static state_type constexpr max_state = GetNameInfo_done + 1;
+  static state_type constexpr state_end = GetNameInfo_done + 1;
 
  private:
   std::shared_ptr<resolver::NameInfoLookup> m_result;
