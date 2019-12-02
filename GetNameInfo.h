@@ -29,8 +29,10 @@
 #include "events/Events.h"
 #include <atomic>
 
-/*!
- * @brief The resolver task.
+namespace task {
+
+/**
+ * The resolver task.
  *
  * Before calling @link group_run run()@endlink, call init() to pass needed parameters.
  *
@@ -64,16 +66,13 @@
  *   // Use resolver->get_error()
  * @endcode
  */
-
-namespace task {
-
 class GetNameInfo : public AIStatefulTask
 {
  protected:
-  //! The base class of this task.
+  /// The base class of this task.
   using direct_base_type = AIStatefulTask;
 
-  //! The different states of the stateful task.
+  /// The different states of the stateful task.
   enum resolver_state_type {
     GetNameInfo_start = direct_base_type::state_end,
     GetNameInfo_ready,
@@ -81,7 +80,7 @@ class GetNameInfo : public AIStatefulTask
   };
 
  public:
-  //! One beyond the largest state of this task.
+  /// One beyond the largest state of this task.
   static state_type constexpr state_end = GetNameInfo_done + 1;
 
  private:
@@ -90,14 +89,12 @@ class GetNameInfo : public AIStatefulTask
   events::BusyInterface m_busy_interface;
 
  public:
-  /*!
-   * @brief Construct an GetNameInfo object.
-   */
+  /// Construct an GetNameInfo object.
   GetNameInfo(CWDEBUG_ONLY(bool debug = false)) CWDEBUG_ONLY(: AIStatefulTask(debug))
     { DoutEntering(dc::statefultask(mSMDebug), "GetNameInfo() [" << (void*)this << "]"); }
 
-  /*!
-   * @brief Start the name lookup of IP address.
+  /**
+   * Start the name lookup of IP address.
    *
    * @param socket_address The IP number to be resolved.
    */
@@ -107,8 +104,8 @@ class GetNameInfo : public AIStatefulTask
     m_handle = m_result->event_server().request(*this, &GetNameInfo::done, m_busy_interface);
   }
 
-  /*!
-   * @brief Test if lookup was successful.
+  /**
+   * Test if lookup was successful.
    *
    * Only call this after done() was called (aka, from the callback).
    *
@@ -116,8 +113,8 @@ class GetNameInfo : public AIStatefulTask
    */
   bool success() const { return m_result->success(); }
 
-  /*!
-   * @brief Get the result.
+  /**
+   * Get the result.
    *
    * Only call this if success() returns true.
    *
@@ -125,8 +122,8 @@ class GetNameInfo : public AIStatefulTask
    */
   std::string const& get_result() const { return m_result->get_result(); }
 
-  /*!
-   * @brief Get the error.
+  /**
+   * Get the error.
    *
    * Only call this if success() returns false.
    *
@@ -135,16 +132,16 @@ class GetNameInfo : public AIStatefulTask
    char const* get_error() const { return m_result->get_error(); }
 
  protected:
-  //! Call finish() (or abort()), not delete.
+  /// The destructor is protected; call finish() (or abort()), not delete.
   ~GetNameInfo() override { DoutEntering(dc::statefultask(mSMDebug), "~GetNameInfo() [" << (void*)this << "]"); m_handle.cancel(); }
 
-  //! Implemenation of state_str for run states.
+  /// Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
 
-  //! Run bs_initialize.
+  /// Run bs_initialize.
   void initialize_impl() override;
 
-  //! Handle mRunState.
+  /// Handle mRunState.
   void multiplex_impl(state_type run_state) override;
 
  private:

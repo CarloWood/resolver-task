@@ -1,5 +1,5 @@
-#include "sys.h"                                                                                                                                                                             
-#include "AddressInfo.h"                                                                                                                                                                     
+#include "sys.h"
+#include "AddressInfo.h"
 #include <iostream>
 
 namespace resolver {

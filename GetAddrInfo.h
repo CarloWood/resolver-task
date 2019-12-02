@@ -30,7 +30,9 @@
 #include "events/Events.h"
 #include <atomic>
 
-/*!
+namespace task {
+
+/**
  * @brief The resolver task.
  *
  * Before calling @link group_run run()@endlink, call init() to pass needed parameters.
@@ -84,16 +86,13 @@
  *   // Use resolver->get_error()
  * @endcode
  */
-
-namespace task {
-
 class GetAddrInfo : public AIStatefulTask
 {
  protected:
-  //! The base class of this task.
+  /// The base class of this task.
   using direct_base_type = AIStatefulTask;
 
-  //! The different states of the stateful task.
+  /// The different states of the stateful task.
   enum resolver_state_type {
     GetAddrInfo_start = direct_base_type::state_end,
     GetAddrInfo_ready,
@@ -101,7 +100,7 @@ class GetAddrInfo : public AIStatefulTask
   };
 
  public:
-  //! One beyond the largest state of this task.
+  /// One beyond the largest state of this task.
   static state_type constexpr state_end = GetAddrInfo_done + 1;
 
  private:
@@ -110,14 +109,12 @@ class GetAddrInfo : public AIStatefulTask
   events::BusyInterface m_busy_interface;
 
  public:
-  /*!
-   * @brief Construct an GetAddrInfo object.
-   */
+  /// Construct an GetAddrInfo object.
   GetAddrInfo(CWDEBUG_ONLY(bool debug = false)) CWDEBUG_ONLY(: AIStatefulTask(debug))
     { DoutEntering(dc::statefultask(mSMDebug), "GetAddrInfo() [" << (void*)this << "]"); }
 
-  /*!
-   * @brief Start the lookup of hostname that needs to be resolved.
+  /**
+   * Start the lookup of hostname that needs to be resolved.
    *
    * @param node The hostname to be resolved.
    * @param port The port number of the end point.
@@ -133,8 +130,8 @@ class GetAddrInfo : public AIStatefulTask
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
-  /*!
-   * @brief Start the lookup of hostname and service name that need to be resolved.
+  /**
+   * Start the lookup of hostname and service name that need to be resolved.
    *
    * @param node The hostname that needs to be resolved.
    * @param service The service name we want to connect or bind to.
@@ -159,8 +156,8 @@ class GetAddrInfo : public AIStatefulTask
     m_handle = m_result->event_server().request(*this, &GetAddrInfo::done, m_busy_interface);
   }
 
-  /*!
-   * @brief Test if lookup was successful.
+  /**
+   * Test if lookup was successful.
    *
    * Only call this after done() was called (aka, from the callback).
    *
@@ -168,8 +165,8 @@ class GetAddrInfo : public AIStatefulTask
    */
   bool success() const { return m_result->success(); }
 
-  /*!
-   * @brief Get the result.
+  /**
+   * Get the result.
    *
    * Only call this if success() returns true.
    *
@@ -177,8 +174,8 @@ class GetAddrInfo : public AIStatefulTask
    */
   resolver::AddressInfoList const& get_result() const { return m_result->get_result(); }
 
-  /*!
-   * @brief Get the error.
+  /**
+   * Get the error.
    *
    * Only call this if success() returns false.
    *
@@ -187,16 +184,16 @@ class GetAddrInfo : public AIStatefulTask
    char const* get_error() const { return m_result->get_error(); }
 
  protected:
-  //! Call finish() (or abort()), not delete.
+  /// Call finish() (or abort()), not delete.
   ~GetAddrInfo() override { DoutEntering(dc::statefultask(mSMDebug), "~GetAddrInfo() [" << (void*)this << "]"); m_handle.cancel(); }
 
-  //! Implemenation of state_str for run states.
+  /// Implemenation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
 
-  //! Run bs_initialize.
+  /// Run bs_initialize.
   void initialize_impl() override;
 
-  //! Handle mRunState.
+  /// Handle mRunState.
   void multiplex_impl(state_type run_state) override;
 
  private:
