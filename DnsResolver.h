@@ -32,10 +32,10 @@
 #include "utils/Singleton.h"
 #include "utils/NodeMemoryPool.h"
 #include "evio/InputDevice.h"
-#include "farmhash/src/farmhash.h"
 #include "threadpool/Timer.h"
 #include "events/Events.h"
 #include "threadpool/AIQueueHandle.h"
+#include <farmhash.h>
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
 #include <memory>
