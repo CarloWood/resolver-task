@@ -11,7 +11,6 @@ include( AICxxProject )
 # DEPENDENCIES
 #
 
-hunter_add_package( farmhash )
 find_package( farmhash REQUIRED )
 
 add_subdirectory( dns/src )
