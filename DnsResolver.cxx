@@ -52,7 +52,7 @@ void* DnsResolver::DnsSocket::dns_created_socket(int fd)
 {
   DoutEntering(dc::notice, "DnsSocket::dns_created_socket(" << fd << ")");
   DnsSocket* resolver_device = new DnsSocket();
-  resolver_device->init(fd);
+  resolver_device->fd_init(fd);
   state_t::wat(resolver_device->m_state)->m_flags.set_dont_close(); // Let the closing be done by libdns.
   DnsResolver::instance().add(resolver_device);
   return resolver_device;
