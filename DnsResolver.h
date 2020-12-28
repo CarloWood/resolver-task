@@ -201,7 +201,7 @@ class DnsResolver : public Singleton<DnsResolver>
   struct dns_resolv_conf* m_dns_resolv_conf;
   using dns_resolver_ts = aithreadsafe::Wrapper<LibdnsWrapper, aithreadsafe::policy::Primitive<std::mutex>>;
   dns_resolver_ts m_dns_resolver;
-  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DnsSocket>, 2>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DnsSocket>, 3>, aithreadsafe::policy::Primitive<std::mutex>>;
   socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
   AIQueueHandle m_handler;
 
