@@ -60,6 +60,7 @@ void* DnsResolver::DnsSocket::dns_created_socket(int fd)
 
 void DnsResolver::add(DnsSocket* dns_socket)
 {
+  DoutEntering(dc::notice, "DnsResolver::add(" << dns_socket << ")");
   // Increment ref count to stop this DnsSocket from being deleted while being used by libdns.
   socket_devices_ts::wat socket_devices_w(m_socket_devices);
   for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
@@ -71,7 +72,9 @@ void DnsResolver::add(DnsSocket* dns_socket)
       return;
     }
   }
-  DoutFatal(dc::core, "DnsSocket::dns_created_socket: creating more than 2 sockets?!");
+  // Hmm. Not sure what is going on, or how many different sockets to expect.
+  // For now, please increase the size of socket_devices_ts array size.
+  DoutFatal(dc::core, "DnsSocket::dns_created_socket: creating more than " << socket_devices_w->size() << " sockets?!");
 }
 
 void DnsResolver::release(DnsSocket* dns_socket)
