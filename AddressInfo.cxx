@@ -27,6 +27,7 @@
 
 #include "sys.h"
 #include "AddressInfo.h"
+#include "utils/macros.h"
 #include <iostream>
 
 namespace resolver {
@@ -56,10 +57,15 @@ std::string ai_flags_str(int flags)
     flags_str += "AI_IDN|";
   if ((flags & AI_CANONIDN))
     flags_str += "AI_CANONIDN|";
+  // These two have been deprecated since GNU C Library version 2.28
+  // because they do not have an effect anymore, but it doesn't hurt
+  // to print them when there.
+PRAGMA_DIAGNOSTIC_PUSH_IGNORED("-W#pragma-messages")
   if ((flags & AI_IDN_ALLOW_UNASSIGNED))
     flags_str += "AI_IDN_ALLOW_UNASSIGNED|";
   if ((flags & AI_IDN_USE_STD3_ASCII_RULES))
     flags_str += "AI_IDN_USE_STD3_ASCII_RULES|";
+PRAGMA_DIAGNOSTIC_POP
 #endif
   return flags_str.substr(0, flags_str.size() - 1);
 }

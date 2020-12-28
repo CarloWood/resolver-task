@@ -422,6 +422,8 @@ void DnsResolver::LibdnsWrapper::start_getaddrinfo(std::shared_ptr<HostnameCache
 {
   m_current_addrinfo_lookup = new_cache_entry;
   // Call DnsResolver.instance().init(false) at the start of main() to initialize the resolver.
+  // The correct way to do this is to add the line `resolver::Scope resolver_scope(handler, false);`
+  // Right below the line `evio::EventLoop event_loop(handler);`.
   ASSERT(m_dns_resolver);
   int error = 0;        // Must be set to 0.
   struct dns_addrinfo* addrinfo = dns_ai_open(m_current_addrinfo_lookup->str.c_str(), nullptr, (dns_type)0, hints.as_addrinfo(), m_dns_resolver, &error);
