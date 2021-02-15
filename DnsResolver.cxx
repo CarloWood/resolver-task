@@ -134,7 +134,10 @@ void DnsResolver::DnsSocket::write_to_fd(int& CWDEBUG_ONLY(allow_deletion_count)
 {
   DoutEntering(dc::io, "DnsSocket::write_to_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
-  dns_so_is_writable(dns_resolver_w->get(), this);
+  auto resolver = dns_resolver_w->get();
+  if (!resolver)        // Can happen when deinit() was called.
+    return;
+  dns_so_is_writable(resolver, this);
   dns_resolver_w->run_dns();
 }
 
@@ -142,7 +145,10 @@ void DnsResolver::DnsSocket::read_from_fd(int& CWDEBUG_ONLY(allow_deletion_count
 {
   DoutEntering(dc::io, "DnsSocket::read_from_fd({" << allow_deletion_count << "}, " << fd << ") [" << this << ']');
   DnsResolver::dns_resolver_ts::wat dns_resolver_w(DnsResolver::instance().m_dns_resolver);
-  dns_so_is_readable(dns_resolver_w->get(), this);
+  auto resolver = dns_resolver_w->get();
+  if (!resolver)        // Can happen when deinit() was called.
+    return;
+  dns_so_is_readable(resolver, this);
   dns_resolver_w->run_dns();
 }
 
@@ -218,6 +224,11 @@ void DnsResolver::init(AIQueueHandle handler, bool recurse)
 void DnsResolver::deinit()
 {
   DoutEntering(dc::notice, "DnsResolver::deinit()");
+  // Block call backs from the DnsSocket.
+  dns_resolver_ts::wat dns_resolver_w(m_dns_resolver);
+  // Stop the timer in case it is running.
+  m_timer.stop();
+  // Close all DNS devices.
   {
     DnsResolver::socket_devices_ts::wat socket_devices_w(m_socket_devices);
     for (unsigned int d = 0; d < socket_devices_w->size(); ++d)
@@ -227,7 +238,8 @@ void DnsResolver::deinit()
         device_ptr->close();
     }
   }
-  dns_resolver_ts::wat(m_dns_resolver)->close();
+  // Terminate dns resolver.
+  dns_resolver_w->close();
 }
 
 DnsResolver::DnsResolver() : m_dns_resolv_conf(nullptr), m_timer(&timed_out), m_hostname_cache(128), m_address_cache(128), m_getaddrinfo_memory_pool(32), m_getnameinfo_memory_pool(32)
@@ -266,7 +278,10 @@ void DnsResolver::timed_out()
 {
   DoutEntering(dc::notice, "DnsResolver::timed_out()");
   dns_resolver_ts::wat dns_resolver_w(instance().m_dns_resolver);
-  dns_timed_out(dns_resolver_w->get());
+  auto resolver = dns_resolver_w->get();
+  if (!resolver)        // Can happen when deinit() was called.
+    return;
+  dns_timed_out(resolver);
   dns_resolver_w->run_dns();
 }
 
