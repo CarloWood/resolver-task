@@ -85,7 +85,7 @@ class AddressInfo
   // Construct an AddressInfo from an addrinfo that was allocated on the heap.
   // ai_addr and ai_cannonname must be either nullptr or point inside the SAME allocation
   // (so that a single std::free(addrinfo) is enough to free all of it.
-  // This demands holds recursively for a non-null ai_next pointer.
+  // This demand holds recursively for a non-null ai_next pointer.
   AddressInfo(struct addrinfo* addrinfo, bool) : m_addrinfo(addrinfo) { }
 
   // Disallow (move) assignment.
