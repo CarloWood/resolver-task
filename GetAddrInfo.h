@@ -43,7 +43,7 @@ namespace task {
  *
  * When the task finishes it calls the callback, use parameter _1,
  * (success) to check whether or not the task actually finished or
- * was cancelled. The boolean is true when it resolved the hostname
+ * was canceled. The boolean is true when it resolved the hostname
  * and false if the task was aborted.
  *
  * Objects of this type can be reused multiple times, see
