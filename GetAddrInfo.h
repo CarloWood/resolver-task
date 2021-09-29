@@ -105,7 +105,7 @@ class GetAddrInfo : public AIStatefulTask
 
  public:
   /// One beyond the largest state of this task.
-  static state_type constexpr state_end = GetAddrInfo_done + 1;
+  static constexpr state_type state_end = GetAddrInfo_done + 1;
 
  private:
   std::shared_ptr<resolver::AddrInfoLookup> m_result;

@@ -85,7 +85,7 @@ class GetNameInfo : public AIStatefulTask
 
  public:
   /// One beyond the largest state of this task.
-  static state_type constexpr state_end = GetNameInfo_done + 1;
+  static constexpr state_type state_end = GetNameInfo_done + 1;
 
  private:
   std::shared_ptr<resolver::NameInfoLookup> m_result;
