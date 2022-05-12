@@ -38,8 +38,7 @@ char const* GetNameInfo::state_str_impl(state_type run_state) const
     AI_CASE_RETURN(GetNameInfo_ready);
     AI_CASE_RETURN(GetNameInfo_done);
   }
-  ASSERT(false);
-  return "UNKNOWN STATE";
+  AI_NEVER_REACHED;
 }
 
 void GetNameInfo::initialize_impl()

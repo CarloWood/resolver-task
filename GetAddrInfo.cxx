@@ -41,8 +41,7 @@ char const* GetAddrInfo::state_str_impl(state_type run_state) const
     AI_CASE_RETURN(GetAddrInfo_ready);
     AI_CASE_RETURN(GetAddrInfo_done);
   }
-  ASSERT(false);
-  return "UNKNOWN STATE";
+  AI_NEVER_REACHED;
 }
 
 void GetAddrInfo::initialize_impl()
