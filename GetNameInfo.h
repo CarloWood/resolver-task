@@ -139,7 +139,7 @@ class GetNameInfo : public AIStatefulTask
   /// The destructor is protected; call finish() (or abort()), not delete.
   ~GetNameInfo() override { DoutEntering(dc::statefultask(mSMDebug), "~GetNameInfo() [" << (void*)this << "]"); m_handle.cancel(); }
 
-  /// Implemenation of state_str for run states.
+  /// Implementation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
 
   /// Run bs_initialize.

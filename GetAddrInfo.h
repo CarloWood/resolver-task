@@ -191,7 +191,7 @@ class GetAddrInfo : public AIStatefulTask
   /// Call finish() (or abort()), not delete.
   ~GetAddrInfo() override { DoutEntering(dc::statefultask(mSMDebug), "~GetAddrInfo() [" << (void*)this << "]"); m_handle.cancel(); }
 
-  /// Implemenation of state_str for run states.
+  /// Implementation of state_str for run states.
   char const* state_str_impl(state_type run_state) const override;
 
   /// Run bs_initialize.
