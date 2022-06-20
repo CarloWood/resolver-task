@@ -44,6 +44,11 @@ char const* GetAddrInfo::state_str_impl(state_type run_state) const
   AI_NEVER_REACHED;
 }
 
+char const* GetAddrInfo::task_name_impl() const
+{
+  return "GetAddrInfo";
+}
+
 void GetAddrInfo::initialize_impl()
 {
   DoutEntering(dc::statefultask(mSMDebug), "GetAddrInfo::initialize_impl() [" << (void*)this << "]");
