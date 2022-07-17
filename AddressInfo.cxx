@@ -60,12 +60,14 @@ std::string ai_flags_str(int flags)
   // These two have been deprecated since GNU C Library version 2.28
   // because they do not have an effect anymore, but it doesn't hurt
   // to print them when there.
+#if 0 // Commented out because suppressing the compiler warning doesn't work :/
 PRAGMA_DIAGNOSTIC_PUSH_IGNORE_deprecated_declarations
   if ((flags & AI_IDN_ALLOW_UNASSIGNED))
     flags_str += "AI_IDN_ALLOW_UNASSIGNED|";
   if ((flags & AI_IDN_USE_STD3_ASCII_RULES))
     flags_str += "AI_IDN_USE_STD3_ASCII_RULES|";
 PRAGMA_DIAGNOSTIC_POP
+#endif
 #endif
   return flags_str.substr(0, flags_str.size() - 1);
 }
