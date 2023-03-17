@@ -579,7 +579,7 @@ char const* DnsResolver::protocol_str(in_proto_t protocol)
   }
 
   {
-    protocol_names_type::rat protocol_names_w(protocol_names_s);
+    protocol_names_type::wat protocol_names_w(protocol_names_s);
     if (AI_UNLIKELY(protocol_names_w->operator[](protocol)))        // Make sure another thread didn't already initialize this entry in the meantime.
     {
       if (result)
