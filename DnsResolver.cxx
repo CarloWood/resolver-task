@@ -29,7 +29,7 @@
 #include "AddrInfoLookup.h"
 #include "NameInfoLookup.h"
 #include "dns/src/dns.h"
-#include "threadsafe/aithreadsafe.h"
+#include "threadsafe/threadsafe.h"
 #include "utils/NodeMemoryPool.h"
 #include "utils/AIAlert.h"
 #include <arpa/inet.h>
@@ -542,7 +542,7 @@ std::shared_ptr<NameInfoLookup> DnsResolver::getnameinfo(evio::SocketAddress con
 char const* DnsResolver::protocol_str(in_proto_t protocol)
 {
   // A simple map from protocol numbers to protocol strings.
-  using protocol_names_type = aithreadsafe::Wrapper<std::array<char const*, IPPROTO_MAX>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using protocol_names_type = threadsafe::Unlocked<std::array<char const*, IPPROTO_MAX>, threadsafe::policy::Primitive<std::mutex>>;
   static protocol_names_type protocol_names_s;
 
   char const* name = protocol_names_type::rat(protocol_names_s)->operator[](protocol);

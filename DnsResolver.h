@@ -199,9 +199,9 @@ class DnsResolver : public Singleton<DnsResolver>
  private:
   friend class DnsSocket;       // Needs access to m_dns_resolver.
   struct dns_resolv_conf* m_dns_resolv_conf;
-  using dns_resolver_ts = aithreadsafe::Wrapper<LibdnsWrapper, aithreadsafe::policy::Primitive<std::mutex>>;
+  using dns_resolver_ts = threadsafe::Unlocked<LibdnsWrapper, threadsafe::policy::Primitive<std::mutex>>;
   dns_resolver_ts m_dns_resolver;
-  using socket_devices_ts = aithreadsafe::Wrapper<std::array<boost::intrusive_ptr<DnsSocket>, 3>, aithreadsafe::policy::Primitive<std::mutex>>;
+  using socket_devices_ts = threadsafe::Unlocked<std::array<boost::intrusive_ptr<DnsSocket>, 3>, threadsafe::policy::Primitive<std::mutex>>;
   socket_devices_ts m_socket_devices;   // The UDP and TCP sockets.
   AIQueueHandle m_handler;
 
@@ -230,7 +230,7 @@ class DnsResolver : public Singleton<DnsResolver>
   };
 
   using servicekey_to_port_cache_type = google::dense_hash_map<Service, uint16_t, ServiceCacheHash, ServiceCacheEqualTo>;
-  using servicekey_to_port_cache_ts = aithreadsafe::Wrapper<servicekey_to_port_cache_type, aithreadsafe::policy::Primitive<std::mutex>>;
+  using servicekey_to_port_cache_ts = threadsafe::Unlocked<servicekey_to_port_cache_type, threadsafe::policy::Primitive<std::mutex>>;
 
   servicekey_to_port_cache_ts m_servicekey_to_port_cache;               // Cache for storing service/protocol to port number map.
 
@@ -371,16 +371,16 @@ class DnsResolver : public Singleton<DnsResolver>
     AddressCache(int nchunks) : memory_pool(nchunks) { }
   };
 
-  using hostname_cache_ts = aithreadsafe::Wrapper<HostnameCache, aithreadsafe::policy::Primitive<std::mutex>>;
+  using hostname_cache_ts = threadsafe::Unlocked<HostnameCache, threadsafe::policy::Primitive<std::mutex>>;
   hostname_cache_ts m_hostname_cache;
 
-  using address_cache_ts = aithreadsafe::Wrapper<AddressCache, aithreadsafe::policy::Primitive<std::mutex>>;
+  using address_cache_ts = threadsafe::Unlocked<AddressCache, threadsafe::policy::Primitive<std::mutex>>;
   address_cache_ts m_address_cache;
 
-  using getaddrinfo_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
+  using getaddrinfo_memory_pool_ts = threadsafe::Unlocked<utils::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
   getaddrinfo_memory_pool_ts m_getaddrinfo_memory_pool;         // Memory pool for objects returned by queue_getaddrinfo.
 
-  using getnameinfo_memory_pool_ts = aithreadsafe::Wrapper<utils::NodeMemoryPool, aithreadsafe::policy::Primitive<std::mutex>>;
+  using getnameinfo_memory_pool_ts = threadsafe::Unlocked<utils::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
   getnameinfo_memory_pool_ts m_getnameinfo_memory_pool;         // Memory pool for objects returned by queue_getnameinfo.
 
   friend task::GetAddrInfo;
