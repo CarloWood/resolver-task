@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12...3.16)
+cmake_minimum_required(VERSION 3.15...3.30)
 
 project(resolver-task
   DESCRIPTION "AIStatefulTask submodule - asynchronous hostname resolver"
@@ -21,12 +21,6 @@ add_subdirectory(dns/src)
 
 # This project is an OBJECT-library, used by other git submodules and the main project.
 add_library(resolver-task_ObjLib OBJECT)
-
-# Set SOURCE_DIR to the current directory.
-set_property(
-  TARGET resolver-task_ObjLib
-  PROPERTY SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-)
 
 # The list of source files.
 target_sources(resolver-task_ObjLib
