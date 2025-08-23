@@ -29,12 +29,12 @@
 
 #include "Service.h"
 #include "AddressInfo.h"
-#include "utils/Singleton.h"
-#include "utils/NodeMemoryPool.h"
+#include "memory/NodeMemoryPool.h"
 #include "evio/InputDevice.h"
 #include "threadpool/Timer.h"
 #include "events/Events.h"
 #include "threadpool/AIQueueHandle.h"
+#include "utils/Singleton.h"
 #include <farmhash.h>
 #include <boost/intrusive_ptr.hpp>
 #include <sparsehash/dense_hash_map>
@@ -359,14 +359,14 @@ class DnsResolver : public Singleton<DnsResolver>
 
   struct HostnameCache
   {
-    utils::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_hostname_cache.
+    memory::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_hostname_cache.
     std::unordered_set<std::shared_ptr<HostnameCacheEntry>, HostnameCacheEntryHash, HostnameCacheEntryEqualTo> unordered_set;
     HostnameCache(int nchunks) : memory_pool(nchunks) { }
   };
 
   struct AddressCache
   {
-    utils::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_address_cache.
+    memory::NodeMemoryPool memory_pool;         // Memory pool of objects stored in m_address_cache.
     std::unordered_set<std::shared_ptr<AddressCacheEntry>, AddressCacheEntryHash, AddressCacheEntryEqualTo> unordered_set;
     AddressCache(int nchunks) : memory_pool(nchunks) { }
   };
@@ -377,10 +377,10 @@ class DnsResolver : public Singleton<DnsResolver>
   using address_cache_ts = threadsafe::Unlocked<AddressCache, threadsafe::policy::Primitive<std::mutex>>;
   address_cache_ts m_address_cache;
 
-  using getaddrinfo_memory_pool_ts = threadsafe::Unlocked<utils::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
+  using getaddrinfo_memory_pool_ts = threadsafe::Unlocked<memory::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
   getaddrinfo_memory_pool_ts m_getaddrinfo_memory_pool;         // Memory pool for objects returned by queue_getaddrinfo.
 
-  using getnameinfo_memory_pool_ts = threadsafe::Unlocked<utils::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
+  using getnameinfo_memory_pool_ts = threadsafe::Unlocked<memory::NodeMemoryPool, threadsafe::policy::Primitive<std::mutex>>;
   getnameinfo_memory_pool_ts m_getnameinfo_memory_pool;         // Memory pool for objects returned by queue_getnameinfo.
 
   friend task::GetAddrInfo;

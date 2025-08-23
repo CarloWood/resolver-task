@@ -30,7 +30,7 @@
 #include "NameInfoLookup.h"
 #include "dns/src/dns.h"
 #include "threadsafe/threadsafe.h"
-#include "utils/NodeMemoryPool.h"
+#include "memory/NodeMemoryPool.h"
 #include "utils/AIAlert.h"
 #include <arpa/inet.h>
 #include <cstring>
@@ -496,7 +496,7 @@ std::shared_ptr<AddrInfoLookup> DnsResolver::queue_getaddrinfo(std::string&& hos
   std::shared_ptr<HostnameCacheEntry> const* new_cache_entry_ptr;
   {
     hostname_cache_ts::wat hostname_cache_w(m_hostname_cache);
-    utils::Allocator<HostnameCacheEntry, utils::NodeMemoryPool> hostname_cache_allocator(hostname_cache_w->memory_pool);
+    memory::Allocator<HostnameCacheEntry, memory::NodeMemoryPool> hostname_cache_allocator(hostname_cache_w->memory_pool);
     auto insert_result = hostname_cache_w->unordered_set.insert(std::allocate_shared<HostnameCacheEntry>(hostname_cache_allocator, std::move(hostname), hints.hash_seed()));
     new_cache_entry_ptr = &*insert_result.first;
     new_cache_entry = insert_result.second;
@@ -507,8 +507,8 @@ std::shared_ptr<AddrInfoLookup> DnsResolver::queue_getaddrinfo(std::string&& hos
   if (new_cache_entry)
     dns_resolver_ts::wat(m_dns_resolver)->queue_getaddrinfo(*new_cache_entry_ptr, hints);
 
-  return std::allocate_shared<AddrInfoLookup>(utils::Allocator<AddrInfoLookup,
-      utils::NodeMemoryPool>(*getaddrinfo_memory_pool_ts::wat(m_getaddrinfo_memory_pool)), *new_cache_entry_ptr, port);
+  return std::allocate_shared<AddrInfoLookup>(memory::Allocator<AddrInfoLookup,
+      memory::NodeMemoryPool>(*getaddrinfo_memory_pool_ts::wat(m_getaddrinfo_memory_pool)), *new_cache_entry_ptr, port);
 }
 
 std::shared_ptr<NameInfoLookup> DnsResolver::getnameinfo(evio::SocketAddress const& address)
@@ -519,7 +519,7 @@ std::shared_ptr<NameInfoLookup> DnsResolver::getnameinfo(evio::SocketAddress con
   std::shared_ptr<AddressCacheEntry> const* new_cache_entry_ptr;
   {
     address_cache_ts::wat address_cache_w(m_address_cache);
-    utils::Allocator<AddressCacheEntry, utils::NodeMemoryPool> address_cache_allocator(address_cache_w->memory_pool);
+    memory::Allocator<AddressCacheEntry, memory::NodeMemoryPool> address_cache_allocator(address_cache_w->memory_pool);
     evio::SocketAddress::arpa_buf_t buf;
     address.ptr_qname(buf);
     auto insert_result = address_cache_w->unordered_set.insert(std::allocate_shared<AddressCacheEntry>(address_cache_allocator, std::string(buf.data(), buf.size())));
@@ -532,8 +532,8 @@ std::shared_ptr<NameInfoLookup> DnsResolver::getnameinfo(evio::SocketAddress con
   if (new_cache_entry)
     dns_resolver_ts::wat(m_dns_resolver)->queue_getnameinfo(*new_cache_entry_ptr);
 
-  return std::allocate_shared<NameInfoLookup>(utils::Allocator<NameInfoLookup,
-      utils::NodeMemoryPool>(*getnameinfo_memory_pool_ts::wat(m_getnameinfo_memory_pool)), *new_cache_entry_ptr);
+  return std::allocate_shared<NameInfoLookup>(memory::Allocator<NameInfoLookup,
+      memory::NodeMemoryPool>(*getnameinfo_memory_pool_ts::wat(m_getnameinfo_memory_pool)), *new_cache_entry_ptr);
 }
 
 // Return the official protocol name of `protocol'.
